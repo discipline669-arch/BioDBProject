@@ -1,0 +1,7 @@
+"sample","condition","col_in_csv"
+"Parental_rep1","Sensitive","dKO_NT_1"
+"Parental_rep2","Sensitive","dKO_NT_2"
+"Parental_rep3","Sensitive","dKO_NT_3"
+"Resistant_rep1","Resistant","CDDP_NT_1"
+"Resistant_rep2","Resistant","CDDK_NT_2"
+"Resistant_rep3","Resistant","CDDK_NT_3"

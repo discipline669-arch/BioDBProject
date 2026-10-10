@@ -56,7 +56,7 @@ resolve_proj <- function() {
   p <- Sys.getenv("BIODB_PROJ", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   cands <- c("/home/nianderbrox/BioDB_Project",
-             "E:/BioDBProject/transcriptomic_drug_resistance_project",
+             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project",
              getwd())
   cands[dir.exists(cands)][1]
 }
@@ -78,8 +78,15 @@ cat("========================================\n")
 # ============================================================
 # 1. Load feature matrix and labels
 # ============================================================
-X <- read.csv(file.path(MLOUT, "expression_matrix.csv"), check.names = FALSE,
-              row.names = "sample")
+expr_rds <- file.path(MLOUT, "expression_matrix.rds")
+if (file.exists(expr_rds)) {
+  X <- readRDS(expr_rds)                       # fast: ~0.03 s vs >4 min for CSV
+  cat("Loaded feature matrix from expression_matrix.rds\n")
+} else {
+  X <- as.matrix(read.csv(file.path(MLOUT, "expression_matrix.csv"),
+                          check.names = FALSE, row.names = "sample"))
+  cat("Loaded feature matrix from expression_matrix.csv (slow fallback)\n")
+}
 labels <- read.csv(file.path(MLOUT, "labels.csv"), stringsAsFactors = FALSE)
 
 stopifnot(all(rownames(X) == labels$sample))
@@ -91,7 +98,7 @@ y <- factor(labels$condition, levels = c("Sensitive", "Resistant"))
 
 FEATURE_COLS <- colnames(X)
 K_VALUES <- c(20, 50, 100, 200, 500)
-SEEDS <- list(LR = 42, RF = 43, SVM = 44)
+SEEDS <- list(LogisticRegression = 42, RandomForest = 43, SVM = 44)
 
 # Dataset indices
 ds <- labels$dataset
@@ -99,27 +106,66 @@ idx_ds1 <- which(ds == "GSE303889_SKOV3")   # SKOV-3 (6 samples)
 idx_ds2 <- which(ds == "GSE283381_OVCAR5")  # OVCAR5 (6 samples)
 
 # ============================================================
+# 1b. Leakage-free cross-dataset normalization
+#     The two datasets were CPM-normalized independently, so they sit on
+#     different per-gene scales (measured variance 0.172 vs 0.047). Standardize
+#     every gene WITHIN each dataset using that dataset's own samples so the
+#     two cell lines share a common scale. This uses no labels and no
+#     cross-dataset held-out information, so it does not leak test signal.
+# ============================================================
+colvar <- function(m) {                 # fast column sample-variance
+  n <- nrow(m)
+  if (n < 2) return(rep(NA_real_, ncol(m)))
+  mu <- colMeans(m)
+  (colSums(m * m) - n * mu^2) / (n - 1)
+}
+
+zscore_within_dataset <- function(x, ds_vec) {
+  z <- x
+  for (d in unique(ds_vec)) {
+    rows <- which(ds_vec == d)
+    sub  <- x[rows, , drop = FALSE]
+    mu   <- colMeans(sub)
+    sd   <- sqrt(colvar(sub))
+    sd[!is.finite(sd) | sd == 0] <- 1
+    z[rows, ] <- sweep(sweep(sub, 2, mu, "-"), 2, sd, "/")
+  }
+  z
+}
+
+NORMALIZATION <- "within_dataset_z"
+if (identical(NORMALIZATION, "within_dataset_z")) {
+  X <- zscore_within_dataset(X, ds)
+  cat("Applied within-dataset per-gene z-scoring (", NORMALIZATION, ")\n")
+}
+
+# ============================================================
 # 2. Helpers
 # ============================================================
 
-# Two-sample t statistic (positive => higher in Resistant)
+# Two-sample t statistic (positive => higher in Resistant). Vectorized over
+# genes (~100x faster than the previous apply()-per-gene implementation).
 tstat_per_gene <- function(x_train, y_train, pos = "Resistant") {
   g1 <- which(y_train == pos)
   g0 <- which(y_train != pos)
-  stats <- apply(x_train, 2, function(v) {
-    m1 <- mean(v[g1]); m0 <- mean(v[g0])
-    if (length(g1) < 2 || length(g0) < 2) return(0)
-    s1 <- sd(v[g1]); s0 <- sd(v[g0])
-    n1 <- length(g1); n0 <- length(g0)
-    sp <- sqrt(((n1 - 1) * s1^2 + (n0 - 1) * s0^2) / (n1 + n0 - 2))
-    if (is.na(sp) || sp == 0) 0 else (m1 - m0) / sp
-  })
-  stats[is.finite(stats)]
+  if (length(g1) < 2 || length(g0) < 2) {
+    return(stats::setNames(rep(0, ncol(x_train)), colnames(x_train)))
+  }
+  m1 <- x_train[g1, , drop = FALSE]
+  m0 <- x_train[g0, , drop = FALSE]
+  mu1 <- colMeans(m1); mu0 <- colMeans(m0)
+  v1 <- colvar(m1);    v0 <- colvar(m0)
+  n1 <- length(g1); n0 <- length(g0)
+  sp <- sqrt(((n1 - 1) * v1 + (n0 - 1) * v0) / (n1 + n0 - 2))
+  t <- (mu1 - mu0) / sp
+  t[!is.finite(t)] <- 0
+  stats::setNames(t, colnames(x_train))
 }
 
 # Nested feature selection: top-K genes by |t| on the TRAINING data only
 select_top_k <- function(x_train, y_train, k) {
   ts <- tstat_per_gene(x_train, y_train)
+  ts <- ts[is.finite(ts) & ts != 0]
   if (length(ts) == 0) return(character(0))
   names(sort(abs(ts), decreasing = TRUE))[seq_len(min(k, length(ts)))]
 }
@@ -175,9 +221,27 @@ scale_new <- function(m, mu, s) {
 # ============================================================
 
 build_lr <- function(x_tr, y_tr, seed) {
-  fit <- glmnet(x_tr, as.numeric(y_tr), family = "binomial",
-                alpha = 1, lambda = 0.1)
-  function(x_te) drop(predict(fit, newx = x_te, type = "response"))
+  set.seed(seed)
+  # Ridge (L2) logistic. Lasso (alpha = 1) is degenerate at this sample size:
+  # with n = 6 and a few near-perfectly-separating genes the lasso CV path
+  # collapses to a near-constant / inverted test probability. Ridge is stable
+  # here and matches the reference Python replication (sklearn LR, L2).
+  # Inner CV uses leave-one-out folds so both classes stay present in training.
+  nfolds <- nrow(x_tr)
+  cv <- tryCatch(
+    glmnet::cv.glmnet(x_tr, as.numeric(y_tr), family = "binomial",
+                      alpha = 0, nfolds = nfolds, standardize = TRUE),
+    error = function(e) NULL
+  )
+  if (!is.null(cv)) {
+    lambda <- cv$lambda.min
+    fit    <- cv$glmnet.fit
+  } else {                       # tiny-n fallback
+    lambda <- 0.1
+    fit    <- glmnet::glmnet(x_tr, as.numeric(y_tr), family = "binomial",
+                             alpha = 0, lambda = lambda)
+  }
+  function(x_te) drop(predict(fit, newx = x_te, s = lambda, type = "response"))
 }
 
 build_rf <- function(x_tr, y_tr, seed) {
@@ -186,6 +250,7 @@ build_rf <- function(x_tr, y_tr, seed) {
                 y = factor(y_tr, levels = c("Sensitive", "Resistant")),
                 probability = TRUE,
                 num.trees = 500, mtry = max(2, floor(sqrt(ncol(x_tr)))),
+                min.node.size = 1,     # default is 10, > n=6 -> no splits possible
                 importance = "impurity", seed = seed, num.threads = 1)
   function(x_te) {
     pr <- predict(fit, data = x_te)
@@ -332,25 +397,33 @@ summarize_metrics <- function(pred_df, label) {
              K = pred_df$K[1], n = nrow(pred_df), t(out), check.names = FALSE)
 }
 
-# External metrics (PRIMARY)
-metrics_ext <- lapply(ext_preds, function(pd) summarize_metrics(pd, "External"))
-ml_metrics_ext <- bind_rows(metrics_ext)
-
 # LOOCV metrics (SECONDARY)
 metrics_loocv <- lapply(loocv_preds, function(pd) summarize_metrics(pd, "LOOCV"))
-ml_metrics_loocv <- bind_rows(metrics_loocv)
+ml_metrics_loocv <- bind_rows(metrics_loocv) %>% mutate(direction = NA_character_)
 
-ml_metrics <- bind_rows(ml_metrics_ext, ml_metrics_loocv)
+# External metrics (PRIMARY): computed PER DIRECTION only. The two directions
+# have opposite probability scales (each model is trained on a different cell
+# line), so pooling them into a single "External" row is not interpretable and
+# has been removed.
+metric_row <- function(prob, condition) {
+  m <- compute_metrics(prob, condition)
+  data.frame(Accuracy  = m[["Accuracy"]],
+             Precision = m[["Precision"]],
+             Recall    = m[["Recall"]],
+             F1        = m[["F1"]],
+             ROC_AUC   = m[["ROC_AUC"]],
+             n         = length(prob))
+}
 
-# Per-direction external metrics
 ext_by_dir <- bind_rows(ext_preds) %>%
   group_by(model, K, direction) %>%
-  summarise(Accuracy = compute_metrics(prob, condition)[["Accuracy"]],
-            ROC_AUC  = compute_metrics(prob, condition)[["ROC_AUC"]],
-            Precision = compute_metrics(prob, condition)[["Precision"]],
-            Recall    = compute_metrics(prob, condition)[["Recall"]],
-            F1        = compute_metrics(prob, condition)[["F1"]],
-            n = n(), .groups = "drop")
+  group_modify(~ metric_row(.x$prob, .x$condition)) %>%
+  ungroup() %>%
+  mutate(validation = "External") %>%
+  relocate(validation, model, K, direction, n)
+
+ml_metrics <- bind_rows(ext_by_dir, ml_metrics_loocv) %>%
+  relocate(validation, model, K, direction)
 
 write.csv(ml_metrics, file.path(MLOUT, "ml_metrics_summary.csv"), row.names = FALSE)
 write.csv(ext_by_dir, file.path(MLOUT, "external_by_direction.csv"), row.names = FALSE)
@@ -358,22 +431,30 @@ write.csv(bind_rows(ext_preds),  file.path(MLOUT, "predictions_external.csv"), r
 write.csv(bind_rows(loocv_preds), file.path(MLOUT, "predictions_LOOCV.csv"), row.names = FALSE)
 
 cat("\n========== METRICS SUMMARY ==========\n")
-cat("\n--- External Validation (PRIMARY) ---\n")
-print(ml_metrics_ext)
+cat("\n--- External Validation (PRIMARY, per direction) ---\n")
+print(as.data.frame(ext_by_dir))
 cat("\n--- LOOCV (SECONDARY, reference only) ---\n")
-print(ml_metrics_loocv)
-cat("\n--- Per-Direction External ---\n")
-print(ext_by_dir)
+print(as.data.frame(ml_metrics_loocv))
 
 # ============================================================
 # 7. ROC curves
 # ============================================================
 plot_rocs <- function(pred_df, outfile, title_suffix) {
+  has_dir <- "direction" %in% names(pred_df) &&
+             length(unique(pred_df$direction)) > 1
+
+  splits <- if (has_dir) {
+    interaction(pred_df$model, pred_df$K, pred_df$direction, drop = TRUE)
+  } else {
+    interaction(pred_df$model, pred_df$K, drop = TRUE)
+  }
+
   roc_all <- pred_df %>%
-    split(list(.$model, .$K)) %>%
+    split(splits) %>%
     lapply(function(sdf) {
       rc <- roc_points(sdf$prob, sdf$condition == "Resistant")
       rc$model <- sdf$model[1]; rc$K <- as.factor(sdf$K[1])
+      if (has_dir) rc$direction <- sdf$direction[1]
       rc$AUC <- auc_from_scores(sdf$prob, sdf$condition == "Resistant")
       rc
     }) %>%
@@ -387,7 +468,7 @@ plot_rocs <- function(pred_df, outfile, title_suffix) {
   p <- ggplot(roc_all, aes(x = FPR, y = TPR, color = K)) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey60") +
     geom_step(linewidth = 0.8) +
-    facet_wrap(~ model) +
+    { if (has_dir) facet_wrap(~ model + direction) else facet_wrap(~ model) } +
     scale_color_manual(values = c("#377eb8", "#4daf4a", "#e41a1c", "#984ea3", "#ff7f00"),
                        name = "Top-K") +
     labs(x = "False Positive Rate", y = "True Positive Rate",

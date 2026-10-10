@@ -24,7 +24,7 @@ resolve_proj <- function() {
   p <- Sys.getenv("BIODB_PROJ", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   cands <- c("/home/nianderbrox/BioDB_Project",
-             "E:/BioDBProject/transcriptomic_drug_resistance_project",
+             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project",
              getwd())
   cands[dir.exists(cands)][1]
 }
@@ -216,6 +216,7 @@ samples2 <- data.frame(
                 "GSM8661176_OV5WTC3.count.out.txt.gz",
                 "GSM8661180_OV5CRC1.count.out.txt.gz",
                 "GSM8661181_OV5CRC2.count.out.txt.gz",
+                
                 "GSM8661182_OV5CRC3.count.out.txt.gz"),
   row.names = c("GSM8661174", "GSM8661175", "GSM8661176",
                 "GSM8661180", "GSM8661181", "GSM8661182")

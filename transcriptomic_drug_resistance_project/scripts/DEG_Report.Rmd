@@ -29,7 +29,7 @@ RESOLVE_REPORT_ROOT <- function() {
   p <- Sys.getenv("BIODB_PROJ", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   cands <- c("/home/nianderbrox/BioDB_Project",
-             "E:/BioDBProject/transcriptomic_drug_resistance_project",
+             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project",
              getwd())
   cands[dir.exists(cands)][1]
 }

@@ -2,6 +2,7 @@
   ML ANALYSIS: RESISTANT vs SENSITIVE
   (Leakage-safe cross-dataset validation)
 ========================================
+Loaded feature matrix from expression_matrix.rds
 Feature matrix: 12 samples x 57357 genes
 Conditions:
 
@@ -11,6 +12,7 @@ Datasets:
 
 GSE283381_OVCAR5  GSE303889_SKOV3 
                6                6 
+Applied within-dataset per-gene z-scoring ( within_dataset_z )
 
 ==============================================
   PRIMARY: CROSS-DATASET VALIDATION
@@ -83,132 +85,146 @@ GSE283381_OVCAR5  GSE303889_SKOV3
 
 ========== METRICS SUMMARY ==========
 
---- External Validation (PRIMARY) ---
-   validation              model   K  n Accuracy Precision Recall        F1
-1    External LogisticRegression  20 12      0.5       0.5    0.5 0.5000000
-2    External LogisticRegression  50 12      0.5       0.5    0.5 0.5000000
-3    External LogisticRegression 100 12      0.5       0.5    0.5 0.5000000
-4    External LogisticRegression 200 12      0.5       0.5    0.5 0.5000000
-5    External LogisticRegression 500 12      0.5       0.5    0.5 0.5000000
-6    External       RandomForest  20 12      0.5        NA    0.0        NA
-7    External       RandomForest  50 12      0.5       0.5    0.5 0.5000000
-8    External       RandomForest 100 12      0.5       0.5    0.5 0.5000000
-9    External       RandomForest 200 12      0.5       0.5    0.5 0.5000000
-10   External       RandomForest 500 12      0.5       0.5    0.5 0.5000000
-11   External                SVM  20 12      0.5       0.5    1.0 0.6666667
-12   External                SVM  50 12      0.5       0.5    1.0 0.6666667
-13   External                SVM 100 12      0.5       0.5    1.0 0.6666667
-14   External                SVM 200 12      0.5       0.5    1.0 0.6666667
-15   External                SVM 500 12      0.5       0.5    1.0 0.6666667
-     ROC_AUC
-1  0.3750000
-2  0.3750000
-3  0.3750000
-4  0.3750000
-5  0.3750000
-6  0.5000000
-7  0.5000000
-8  0.5000000
-9  0.5000000
-10 0.5000000
-11 0.4305556
-12 0.6388889
-13 0.5000000
-14 0.5000000
-15 0.5000000
+--- External Validation (PRIMARY, per direction) ---
+   validation              model   K     direction n  Accuracy Precision
+1    External LogisticRegression  20 OVCAR5->SKOV3 6 0.5000000 0.5000000
+2    External LogisticRegression  20 SKOV3->OVCAR5 6 1.0000000 1.0000000
+3    External LogisticRegression  50 OVCAR5->SKOV3 6 0.3333333 0.3333333
+4    External LogisticRegression  50 SKOV3->OVCAR5 6 1.0000000 1.0000000
+5    External LogisticRegression 100 OVCAR5->SKOV3 6 0.5000000 0.5000000
+6    External LogisticRegression 100 SKOV3->OVCAR5 6 0.6666667 0.6666667
+7    External LogisticRegression 200 OVCAR5->SKOV3 6 0.6666667 0.6666667
+8    External LogisticRegression 200 SKOV3->OVCAR5 6 0.0000000 0.0000000
+9    External LogisticRegression 500 OVCAR5->SKOV3 6 0.6666667 0.6666667
+10   External LogisticRegression 500 SKOV3->OVCAR5 6 0.3333333 0.3333333
+11   External       RandomForest  20 OVCAR5->SKOV3 6 0.3333333 0.3333333
+12   External       RandomForest  20 SKOV3->OVCAR5 6 1.0000000 1.0000000
+13   External       RandomForest  50 OVCAR5->SKOV3 6 0.5000000 0.5000000
+14   External       RandomForest  50 SKOV3->OVCAR5 6 1.0000000 1.0000000
+15   External       RandomForest 100 OVCAR5->SKOV3 6 0.5000000 0.5000000
+16   External       RandomForest 100 SKOV3->OVCAR5 6 0.8333333 0.7500000
+17   External       RandomForest 200 OVCAR5->SKOV3 6 0.6666667 0.6666667
+18   External       RandomForest 200 SKOV3->OVCAR5 6 0.3333333 0.4000000
+19   External       RandomForest 500 OVCAR5->SKOV3 6 1.0000000 1.0000000
+20   External       RandomForest 500 SKOV3->OVCAR5 6 0.1666667 0.2500000
+21   External                SVM  20 OVCAR5->SKOV3 6 0.5000000 0.5000000
+22   External                SVM  20 SKOV3->OVCAR5 6 1.0000000 1.0000000
+23   External                SVM  50 OVCAR5->SKOV3 6 0.5000000 0.5000000
+24   External                SVM  50 SKOV3->OVCAR5 6 1.0000000 1.0000000
+25   External                SVM 100 OVCAR5->SKOV3 6 0.5000000 0.5000000
+26   External                SVM 100 SKOV3->OVCAR5 6 0.5000000 0.5000000
+27   External                SVM 200 OVCAR5->SKOV3 6 0.5000000 0.5000000
+28   External                SVM 200 SKOV3->OVCAR5 6 0.3333333 0.4000000
+29   External                SVM 500 OVCAR5->SKOV3 6 0.5000000 0.5000000
+30   External                SVM 500 SKOV3->OVCAR5 6 0.3333333 0.4000000
+      Recall        F1   ROC_AUC
+1  0.6666667 0.5714286 0.5555556
+2  1.0000000 1.0000000 1.0000000
+3  0.3333333 0.3333333 0.4444444
+4  1.0000000 1.0000000 1.0000000
+5  0.6666667 0.5714286 0.5555556
+6  0.6666667 0.6666667 0.5555556
+7  0.6666667 0.6666667 0.6666667
+8  0.0000000        NA 0.0000000
+9  0.6666667 0.6666667 0.6666667
+10 0.3333333 0.3333333 0.2222222
+11 0.3333333 0.3333333 0.5555556
+12 1.0000000 1.0000000 1.0000000
+13 0.3333333 0.4000000 0.6111111
+14 1.0000000 1.0000000 1.0000000
+15 0.6666667 0.5714286 0.4444444
+16 1.0000000 0.8571429 0.7777778
+17 0.6666667 0.6666667 0.6666667
+18 0.6666667 0.5000000 0.0000000
+19 1.0000000 1.0000000 1.0000000
+20 0.3333333 0.2857143 0.0000000
+21 0.6666667 0.5714286 0.5555556
+22 1.0000000 1.0000000 1.0000000
+23 0.6666667 0.5714286 0.4444444
+24 1.0000000 1.0000000 1.0000000
+25 0.6666667 0.5714286 0.5555556
+26 0.6666667 0.5714286 0.5555556
+27 0.6666667 0.5714286 0.6666667
+28 0.6666667 0.5000000 0.0000000
+29 0.6666667 0.5714286 0.7777778
+30 0.6666667 0.5000000 0.2222222
 
 --- LOOCV (SECONDARY, reference only) ---
-   validation              model   K  n  Accuracy Precision    Recall        F1
-1       LOOCV LogisticRegression  20 12 1.0000000         1 1.0000000 1.0000000
-2       LOOCV LogisticRegression  50 12 1.0000000         1 1.0000000 1.0000000
-3       LOOCV LogisticRegression 100 12 1.0000000         1 1.0000000 1.0000000
-4       LOOCV LogisticRegression 200 12 1.0000000         1 1.0000000 1.0000000
-5       LOOCV LogisticRegression 500 12 1.0000000         1 1.0000000 1.0000000
-6       LOOCV       RandomForest  20 12 1.0000000         1 1.0000000 1.0000000
-7       LOOCV       RandomForest  50 12 1.0000000         1 1.0000000 1.0000000
-8       LOOCV       RandomForest 100 12 1.0000000         1 1.0000000 1.0000000
-9       LOOCV       RandomForest 200 12 1.0000000         1 1.0000000 1.0000000
-10      LOOCV       RandomForest 500 12 1.0000000         1 1.0000000 1.0000000
-11      LOOCV                SVM  20 12 1.0000000         1 1.0000000 1.0000000
-12      LOOCV                SVM  50 12 0.9166667         1 0.8333333 0.9090909
-13      LOOCV                SVM 100 12 1.0000000         1 1.0000000 1.0000000
-14      LOOCV                SVM 200 12 1.0000000         1 1.0000000 1.0000000
-15      LOOCV                SVM 500 12 1.0000000         1 1.0000000 1.0000000
-   ROC_AUC
-1        1
-2        1
-3        1
-4        1
-5        1
-6        1
-7        1
-8        1
-9        1
-10       1
-11       1
-12       1
-13       1
-14       1
-15       1
-
---- Per-Direction External ---
-# A tibble: 30 × 9
-   model              K direction Accuracy ROC_AUC Precision Recall     F1     n
-   <chr>          <dbl> <chr>        <dbl>   <dbl>     <dbl>  <dbl>  <dbl> <int>
- 1 LogisticRegre…    20 OVCAR5->…      0.5     0         0.5      1  0.667     6
- 2 LogisticRegre…    20 SKOV3->O…      0.5     0.5      NA        0 NA         6
- 3 LogisticRegre…    50 OVCAR5->…      0.5     0         0.5      1  0.667     6
- 4 LogisticRegre…    50 SKOV3->O…      0.5     0.5      NA        0 NA         6
- 5 LogisticRegre…   100 OVCAR5->…      0.5     0         0.5      1  0.667     6
- 6 LogisticRegre…   100 SKOV3->O…      0.5     0.5      NA        0 NA         6
- 7 LogisticRegre…   200 OVCAR5->…      0.5     0         0.5      1  0.667     6
- 8 LogisticRegre…   200 SKOV3->O…      0.5     0.5      NA        0 NA         6
- 9 LogisticRegre…   500 OVCAR5->…      0.5     0         0.5      1  0.667     6
-10 LogisticRegre…   500 SKOV3->O…      0.5     0.5      NA        0 NA         6
-# ℹ 20 more rows
+   validation              model   K  n Accuracy Precision Recall F1 ROC_AUC
+1       LOOCV LogisticRegression  20 12        1         1      1  1       1
+2       LOOCV LogisticRegression  50 12        1         1      1  1       1
+3       LOOCV LogisticRegression 100 12        1         1      1  1       1
+4       LOOCV LogisticRegression 200 12        1         1      1  1       1
+5       LOOCV LogisticRegression 500 12        1         1      1  1       1
+6       LOOCV       RandomForest  20 12        1         1      1  1       1
+7       LOOCV       RandomForest  50 12        1         1      1  1       1
+8       LOOCV       RandomForest 100 12        1         1      1  1       1
+9       LOOCV       RandomForest 200 12        1         1      1  1       1
+10      LOOCV       RandomForest 500 12        1         1      1  1       1
+11      LOOCV                SVM  20 12        1         1      1  1       1
+12      LOOCV                SVM  50 12        1         1      1  1       1
+13      LOOCV                SVM 100 12        1         1      1  1       1
+14      LOOCV                SVM 200 12        1         1      1  1       1
+15      LOOCV                SVM 500 12        1         1      1  1       1
+   direction
+1       <NA>
+2       <NA>
+3       <NA>
+4       <NA>
+5       <NA>
+6       <NA>
+7       <NA>
+8       <NA>
+9       <NA>
+10      <NA>
+11      <NA>
+12      <NA>
+13      <NA>
+14      <NA>
+15      <NA>
 
 Biomarker panel (top 20, ranked by cross-dataset selection frequency):
-   rank       gene n_select_slots mean_freq mean_abs_lfc log2fc_mag_ds1
-1     1     ZNF845             15       0.5     8.218144             NA
-2     2     PAEPP1             15       0.5     7.792893             NA
-3     3      GRHL2             15       0.5     6.813816             NA
-4     4       MAL2             15       0.5     6.552898       7.231995
-5     5      OVOL1             15       0.5     5.909706             NA
-6     6     ZNF300             15       0.5     5.779726             NA
-7     7       KYNU             15       0.5     5.351809       6.861701
-8     8       IL1B             15       0.5     5.078030             NA
-9     9       AQP3             15       0.5     5.013916             NA
-10   10      INAVA             15       0.5     4.642834       6.395178
-11   11      EPHA1             15       0.5     3.438501       1.485314
-12   12     GALNT3             15       0.5     3.242540       2.077748
-13   13  RAB11FIP4             15       0.5     3.162733       1.380945
-14   14  LINC01605             15       0.5     2.964384             NA
-15   15       KLF5             15       0.5     2.666988       3.527863
-16   16   RPL12P14             15       0.5     2.335313             NA
-17   17      PRDM8             15       0.5     2.190064             NA
-18   18      GRB10             15       0.5     1.828393             NA
-19   19      TRAF4             15       0.5     1.366526       1.366526
-20   20 AC023813.4             15       0.5          NaN             NA
+   rank      gene n_select_slots mean_freq mean_abs_lfc log2fc_mag_ds1
+1     1      MAL2             15       0.8     6.552898       7.231995
+2     2    GALNT6             15       0.7     5.951808      10.493782
+3     3     LDOC1             15       0.5    13.065934      13.065934
+4     4    SH2D4A             15       0.5    11.932628      11.932628
+5     5   FBXL21P             15       0.5    11.312299      11.312299
+6     6   EPB41L3             15       0.5    11.050915      11.050915
+7     7   TMEM218             15       0.5    10.892353      10.892353
+8     8     CALB1             15       0.5     9.745134       9.745134
+9     9 LINC02582             15       0.5     9.708526       9.708526
+10   10     CELF2             15       0.5     9.041867       9.041867
+11   11  DCAF12L2             15       0.5     8.953192       8.953192
+12   12    ZNF845             15       0.5     8.218144             NA
+13   13      TCF4             15       0.5     7.841730       7.841730
+14   14    PAEPP1             15       0.5     7.792893             NA
+15   15     GRHL2             15       0.5     6.813816             NA
+16   16     MBNL3             15       0.5     6.796852       6.796852
+17   17   ARHGEF9             15       0.5     6.483607       6.483607
+18   18    ZNF462             15       0.5     6.350764       6.350764
+19   19   ZNF518A             15       0.5     6.193746       6.193746
+20   20     OVOL1             15       0.5     5.909706             NA
    log2fc_mag_ds2
-1        8.218144
-2        7.792893
-3        6.813816
-4        5.873800
-5        5.909706
-6        5.779726
-7        3.841917
-8        5.078030
-9        5.013916
-10       2.890491
-11       5.391687
-12       4.407333
-13       4.944521
-14       2.964384
-15       1.806113
-16       2.335313
-17       2.190064
-18       1.828393
+1        5.873800
+2        1.409835
+3              NA
+4              NA
+5              NA
+6              NA
+7              NA
+8              NA
+9              NA
+10             NA
+11             NA
+12       8.218144
+13             NA
+14       7.792893
+15       6.813816
+16             NA
+17             NA
+18             NA
 19             NA
-20             NA
+20       5.909706
 
-All outputs written to: E:/BioDBProject/transcriptomic_drug_resistance_project/results/ml 
+All outputs written to: E:\BioDBProject\BioDBProject\transcriptomic_drug_resistance_project/results/ml 

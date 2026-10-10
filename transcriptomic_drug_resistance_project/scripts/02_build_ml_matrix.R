@@ -14,7 +14,8 @@
 # the ML feature space.
 #
 # Outputs:
-#   results/ml/expression_matrix.csv  (12 samples x all genes, log2(CPM+1))
+#   results/ml/expression_matrix.rds  (matrix: 12 samples x all genes, log2(CPM+1))
+#   results/ml/expression_matrix.csv  (same, human-readable; slow to read back)
 #   results/ml/labels.csv             (sample / dataset / condition)
 # ============================================================
 
@@ -30,7 +31,7 @@ resolve_proj <- function() {
   p <- Sys.getenv("BIODB_PROJ", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   cands <- c("/home/nianderbrox/BioDB_Project",
-             "E:/BioDBProject/transcriptomic_drug_resistance_project",
+             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project",
              getwd())
   cands[dir.exists(cands)][1]
 }
@@ -70,8 +71,12 @@ collapse_to_symbols <- function(count_mat, symbol_vec) {
     return(count_mat)
   }
   cat("  Aggregating duplicated gene symbols...\n")
-  sums <- rowsum(count_mat, group = symbol_vec)
-  rownames(sums) <- unique(symbol_vec)
+  # rowsum() already assigns row names = the group levels, in its own
+  # (sorted) order. Overwriting them with unique(symbol_vec) — which is in
+  # first-appearance order — would permute the data onto the wrong genes.
+  sums <- rowsum(count_mat, group = symbol_vec, reorder = TRUE)
+  stopifnot(setequal(rownames(sums), unique(as.character(symbol_vec))),
+            nrow(sums) == length(unique(as.character(symbol_vec))))
   sums
 }
 
@@ -138,10 +143,19 @@ labels <- data.frame(
   stringsAsFactors = FALSE
 )
 
+# Numeric matrix (samples x genes) with rownames = sample id. This is the
+# format the ML script (03) loads via readRDS(), which is ~1000x faster than
+# read.csv() on a 57k-column table of the same data.
+expr_mat <- as.matrix(X[, setdiff(colnames(X), "sample"), drop = FALSE])
+storage.mode(expr_mat) <- "double"
+rownames(expr_mat) <- X$sample
+
+saveRDS(expr_mat, file.path(MLOUT, "expression_matrix.rds"))
 write.csv(X,     file.path(MLOUT, "expression_matrix.csv"), row.names = FALSE)
 write.csv(labels, file.path(MLOUT, "labels.csv"), row.names = FALSE)
 
 cat("\nWrote:\n")
+cat("  ", file.path(MLOUT, "expression_matrix.rds"), "\n")
 cat("  ", file.path(MLOUT, "expression_matrix.csv"), "\n")
 cat("  ", file.path(MLOUT, "labels.csv"), "\n")
 cat("Dimensions:", nrow(X), "samples x", ncol(X) - 1, "genes\n")

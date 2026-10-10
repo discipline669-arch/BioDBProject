@@ -3,24 +3,36 @@
 # BioDB Project — Member 3: ML Classification & Biomarker Discovery
 # Datasets: GSE303889 (SKOV-3) + GSE283381 (OVCAR5)
 #
-# Models (per proposal §7): Logistic Regression (L1 glmnet),
+# Models (per proposal §7): Logistic Regression (L2 ridge glmnet),
 #                            Random Forest (ranger),
 #                            SVM radial (e1071)
 #
-# VALIDATION HIERARCHY (no data leakage):
+# VALIDATION HIERARCHY:
 #
 #   PRIMARY — Cross-dataset external validation:
 #     Train on ALL 6 samples of one cell line, predict the other.
 #     Feature selection (top-K by |t|) is performed ONLY on the
 #     training dataset. The test dataset is never consulted for
-#     feature selection, scaling, or model fitting.
+#     feature selection or model fitting.
 #     Direction A: SKOV-3 → OVCAR5
 #     Direction B: OVCAR5 → SKOV-3
 #
-#   SECONDARY — Within-dataset LOOCV (reference only):
-#     Leave-One-Out CV across all 12 samples. Feature selection
-#     is nested inside each training fold. Results are reported
-#     for within-study comparison only — not for biomarker claims.
+#     Two test-normalization schemes are reported per direction:
+#       target_z    (PRIMARY, transductive): test rows are z-scored
+#                   with the test cell line's own mean/SD. This batch-
+#                   corrects the two independently CPM-normalized datasets
+#                   and matches the reference Python replication.
+#       train_stats (secondary, strict): test rows are z-scored with the
+#                   TRAINING cell line's mean/SD. Uses no information from
+#                   the held-out dataset at all — the leak-free number.
+#     In both schemes the model is fit once on identically normalized
+#     training rows; only the test-row normalization differs.
+#
+#   SECONDARY — Within-cell-line LOOCV (reference only):
+#     Leave-one-out within each cell line (5 training samples, 1 held
+#     out). Feature selection AND normalization are computed from the
+#     training samples only, so the held-out sample never influences its
+#     own preprocessing. Results are for within-study comparison only.
 #
 #   IMPORTANT: The ML feature space is the full intersected gene
 #   set (all genes present in both datasets). No DEG-based
@@ -28,11 +40,12 @@
 #   computed using both datasets and would leak information.
 #
 # Outputs (results/ml/):
-#   ml_metrics_summary.csv       metrics per model x K x validation
-#   predictions_external.csv     per-direction external predictions
+#   ml_metrics_summary.csv       metrics per model x K x validation x normalization
+#   predictions_external.csv     per-direction external predictions (both normalizations)
 #   predictions_LOOCV.csv        per-fold held-out predictions (secondary)
-#   external_by_direction.csv    per-direction external metrics
-#   ROC_external.png
+#   external_by_direction.csv    per-direction external metrics (both normalizations)
+#   ROC_external.png             external ROC (target_z, primary)
+#   ROC_external_trainstats.png  external ROC (train_stats, strict)
 #   ROC_LOOCV.png
 #   confusion_external.png
 #   feature_importance.csv       per model x K: selection frequency
@@ -106,12 +119,12 @@ idx_ds1 <- which(ds == "GSE303889_SKOV3")   # SKOV-3 (6 samples)
 idx_ds2 <- which(ds == "GSE283381_OVCAR5")  # OVCAR5 (6 samples)
 
 # ============================================================
-# 1b. Leakage-free cross-dataset normalization
+# 1b. Per-fold cross-dataset normalization
 #     The two datasets were CPM-normalized independently, so they sit on
-#     different per-gene scales (measured variance 0.172 vs 0.047). Standardize
-#     every gene WITHIN each dataset using that dataset's own samples so the
-#     two cell lines share a common scale. This uses no labels and no
-#     cross-dataset held-out information, so it does not leak test signal.
+#     different per-gene scales (measured variance 0.172 vs 0.047). Genes are
+#     standardized so the two cell lines share a common scale. This is done
+#     INSIDE each fold from training rows only, so no held-out information is
+#     used to fit the model.
 # ============================================================
 colvar <- function(m) {                 # fast column sample-variance
   n <- nrow(m)
@@ -120,24 +133,33 @@ colvar <- function(m) {                 # fast column sample-variance
   (colSums(m * m) - n * mu^2) / (n - 1)
 }
 
-zscore_within_dataset <- function(x, ds_vec) {
-  z <- x
-  for (d in unique(ds_vec)) {
-    rows <- which(ds_vec == d)
-    sub  <- x[rows, , drop = FALSE]
-    mu   <- colMeans(sub)
-    sd   <- sqrt(colvar(sub))
-    sd[!is.finite(sd) | sd == 0] <- 1
-    z[rows, ] <- sweep(sweep(sub, 2, mu, "-"), 2, sd, "/")
-  }
-  z
+# Standardize training rows with training statistics, and return the test rows
+# under two normalizations:
+#   te_self  -> test rows z-scored with the TEST rows' own mean/SD (transductive)
+#   te_train -> test rows z-scored with the TRAINING rows' mean/SD (strict)
+# For external folds `te_idx` is the whole held-out cell line; for LOOCV it is
+# a single sample (so `te_self` is degenerate and `te_train` must be used).
+standardize_train_test <- function(x, tr_idx, te_idx) {
+  x_tr <- x[tr_idx, , drop = FALSE]
+  mu_tr <- colMeans(x_tr)
+  sd_tr <- sqrt(colvar(x_tr))
+  sd_tr[!is.finite(sd_tr) | sd_tr == 0] <- 1
+  x_tr_z <- sweep(sweep(x_tr, 2, mu_tr, "-"), 2, sd_tr, "/")
+
+  x_te <- x[te_idx, , drop = FALSE]
+  mu_te <- colMeans(x_te)
+  sd_te <- sqrt(colvar(x_te))
+  sd_te[!is.finite(sd_te) | sd_te == 0] <- 1
+  x_te_self  <- sweep(sweep(x_te, 2, mu_te, "-"), 2, sd_te, "/")
+  x_te_train <- sweep(sweep(x_te, 2, mu_tr, "-"), 2, sd_tr, "/")
+
+  list(tr = x_tr_z, te_self = x_te_self, te_train = x_te_train)
 }
 
-NORMALIZATION <- "within_dataset_z"
-if (identical(NORMALIZATION, "within_dataset_z")) {
-  X <- zscore_within_dataset(X, ds)
-  cat("Applied within-dataset per-gene z-scoring (", NORMALIZATION, ")\n")
-}
+# Test-normalization schemes reported for external validation. The first is the
+# primary (batch-corrected) result; the second is the strictly non-transductive
+# sensitivity check.
+NORM_MODES <- c(target_z = "te_self", train_stats = "te_train")
 
 # ============================================================
 # 2. Helpers
@@ -260,11 +282,26 @@ build_rf <- function(x_tr, y_tr, seed) {
 
 build_svm <- function(x_tr, y_tr, seed) {
   set.seed(seed)
-  fit <- svm(x_tr, factor(y_tr, levels = c("Sensitive", "Resistant")),
-             probability = TRUE, kernel = "radial", scale = FALSE)
+  yf <- factor(y_tr, levels = c("Sensitive", "Resistant"))
+  # libsvm's internal probability cross-validation can fail when a fold ends up
+  # single-class (possible at n = 5-6). Fall back to non-probabilistic SVM and
+  # map decision values through a logistic, orienting the sign by training AUC.
+  fit <- tryCatch(
+    svm(x_tr, yf, probability = TRUE, kernel = "radial", scale = FALSE),
+    error = function(e) NULL, warning = function(w) NULL
+  )
+  if (!is.null(fit)) {
+    return(function(x_te) {
+      pr <- predict(fit, x_te, probability = TRUE)
+      attr(pr, "probabilities")[, "Resistant"]
+    })
+  }
+  fit <- svm(x_tr, yf, probability = FALSE, kernel = "radial", scale = FALSE)
+  dv_tr <- attr(predict(fit, x_tr, decision.values = TRUE), "decision.values")[, 1]
+  orient <- if (auc_from_scores(dv_tr, y_tr == "Resistant") >= 0.5) 1 else -1
   function(x_te) {
-    pr <- predict(fit, x_te, probability = TRUE)
-    attr(pr, "probabilities")[, "Resistant"]
+    dv <- attr(predict(fit, x_te, decision.values = TRUE), "decision.values")[, 1]
+    plogis(orient * dv)
   }
 }
 
@@ -304,34 +341,41 @@ for (model_name in names(MODEL_BUILDERS)) {
       tr_idx <- ext_plans[[d]]$train
       te_idx <- ext_plans[[d]]$test
 
-      feats <- select_top_k(X[tr_idx, , drop = FALSE], y[tr_idx], K)
+      std <- standardize_train_test(X, tr_idx, te_idx)
+      feats <- select_top_k(std$tr, y[tr_idx], K)
       if (length(feats) < 2) {
         cat("  WARNING: fewer than 2 features selected for", ext_plans[[d]]$name, "- skipping\n")
         next
       }
       cat("  ", ext_plans[[d]]$name, ": selected", length(feats), "features\n")
 
-      x_tr <- X[tr_idx, feats, drop = FALSE]
+      x_tr <- std$tr[, feats, drop = FALSE]
       mu <- colMeans(x_tr); s <- apply(x_tr, 2, sd); s[s == 0] <- 1
       x_tr_s <- scale_new(as.matrix(x_tr), mu, s)
-      x_te_s <- scale_new(as.matrix(X[te_idx, feats, drop = FALSE]), mu, s)
 
+      # Model is fit once; only the test-row normalization differs.
       fit <- builder(x_tr_s, y[tr_idx], SEEDS[[model_name]])
-      prob <- fit(x_te_s)
 
-      fold_pred <- rbind(fold_pred, data.frame(
-        sample = rownames(X)[te_idx],
-        condition = as.character(y[te_idx]),
-        dataset = ds[te_idx],
-        direction = ext_plans[[d]]$name,
-        model = model_name, K = K, prob = prob
-      ))
+      for (norm_name in names(NORM_MODES)) {
+        x_te <- std[[NORM_MODES[[norm_name]]]][, feats, drop = FALSE]
+        x_te_s <- scale_new(as.matrix(x_te), mu, s)
+        prob <- fit(x_te_s)
+
+        fold_pred <- rbind(fold_pred, data.frame(
+          sample = rownames(X)[te_idx],
+          condition = as.character(y[te_idx]),
+          dataset = ds[te_idx],
+          direction = ext_plans[[d]]$name,
+          normalization = norm_name,
+          model = model_name, K = K, prob = prob
+        ))
+      }
 
       imp_mat[feats, d] <- 1
     }
 
     ext_preds[[paste(model_name, K, sep = "_K")]] <- fold_pred
-    sel_freq <- rowSums(imp_mat) / 2
+    sel_freq <- rowSums(imp_mat) / length(ext_plans)
     ext_imp[[paste(model_name, K, sep = "_K")]] <-
       data.frame(gene = FEATURE_COLS, model = model_name, K = K,
                  selection_freq = sel_freq, stringsAsFactors = FALSE)
@@ -339,10 +383,10 @@ for (model_name in names(MODEL_BUILDERS)) {
 }
 
 # ============================================================
-# 5. SECONDARY: Within-dataset LOOCV (reference only)
+# 5. SECONDARY: Within-cell-line LOOCV (reference only)
 # ============================================================
 cat("\n==============================================\n")
-cat("  SECONDARY: WITHIN-DATASET LOOCV (reference)\n")
+cat("  SECONDARY: WITHIN-CELL-LINE LOOCV (reference)\n")
 cat("==============================================\n")
 
 loocv_preds <- list()
@@ -357,16 +401,21 @@ for (model_name in names(MODEL_BUILDERS)) {
                       dimnames = list(FEATURE_COLS, paste0("fold", 1:12)))
 
     for (i in seq_len(nrow(X))) {
-      tr_idx <- setdiff(seq_len(nrow(X)), i)
+      # Leave-one-out WITHIN the held-out sample's own cell line: train on the
+      # other 5 samples of that dataset only. Preprocessing (normalization and
+      # feature selection) uses the 5 training samples alone.
+      same <- which(ds == ds[i])
+      tr_idx <- setdiff(same, i)
       te_idx <- i
 
-      feats <- select_top_k(X[tr_idx, , drop = FALSE], y[tr_idx], K)
+      std <- standardize_train_test(X, tr_idx, te_idx)
+      feats <- select_top_k(std$tr, y[tr_idx], K)
       if (length(feats) < 2) next
 
-      x_tr <- X[tr_idx, feats, drop = FALSE]
+      x_tr <- std$tr[, feats, drop = FALSE]
       mu <- colMeans(x_tr); s <- apply(x_tr, 2, sd); s[s == 0] <- 1
       x_tr_s <- scale_new(as.matrix(x_tr), mu, s)
-      x_te_s <- scale_new(as.matrix(X[te_idx, feats, drop = FALSE]), mu, s)
+      x_te_s <- scale_new(as.matrix(std$te_train[, feats, drop = FALSE]), mu, s)
 
       fit <- builder(x_tr_s, y[tr_idx], SEEDS[[model_name]])
       prob <- fit(x_te_s)
@@ -374,6 +423,7 @@ for (model_name in names(MODEL_BUILDERS)) {
       fold_pred <- rbind(fold_pred, data.frame(
         sample = rownames(X)[te_idx],
         condition = as.character(y[te_idx]),
+        normalization = "train_stats",
         model = model_name, K = K, prob = prob
       ))
 
@@ -381,7 +431,7 @@ for (model_name in names(MODEL_BUILDERS)) {
     }
 
     loocv_preds[[paste(model_name, K, sep = "_K")]] <- fold_pred
-    sel_freq <- rowSums(imp_mat) / 12
+    sel_freq <- rowSums(imp_mat) / nrow(X)
     loocv_imp[[paste(model_name, K, sep = "_K")]] <-
       data.frame(gene = FEATURE_COLS, model = model_name, K = K,
                  selection_freq = sel_freq, stringsAsFactors = FALSE)
@@ -399,12 +449,13 @@ summarize_metrics <- function(pred_df, label) {
 
 # LOOCV metrics (SECONDARY)
 metrics_loocv <- lapply(loocv_preds, function(pd) summarize_metrics(pd, "LOOCV"))
-ml_metrics_loocv <- bind_rows(metrics_loocv) %>% mutate(direction = NA_character_)
+ml_metrics_loocv <- bind_rows(metrics_loocv) %>%
+  mutate(direction = NA_character_, normalization = "train_stats")
 
-# External metrics (PRIMARY): computed PER DIRECTION only. The two directions
-# have opposite probability scales (each model is trained on a different cell
-# line), so pooling them into a single "External" row is not interpretable and
-# has been removed.
+# External metrics (PRIMARY): computed PER DIRECTION AND NORMALIZATION. The two
+# directions have opposite probability scales (each model is trained on a
+# different cell line), so pooling them into a single "External" row is not
+# interpretable and has been removed.
 metric_row <- function(prob, condition) {
   m <- compute_metrics(prob, condition)
   data.frame(Accuracy  = m[["Accuracy"]],
@@ -416,14 +467,14 @@ metric_row <- function(prob, condition) {
 }
 
 ext_by_dir <- bind_rows(ext_preds) %>%
-  group_by(model, K, direction) %>%
+  group_by(model, K, direction, normalization) %>%
   group_modify(~ metric_row(.x$prob, .x$condition)) %>%
   ungroup() %>%
   mutate(validation = "External") %>%
-  relocate(validation, model, K, direction, n)
+  relocate(validation, model, K, direction, normalization, n)
 
 ml_metrics <- bind_rows(ext_by_dir, ml_metrics_loocv) %>%
-  relocate(validation, model, K, direction)
+  relocate(validation, model, K, direction, normalization)
 
 write.csv(ml_metrics, file.path(MLOUT, "ml_metrics_summary.csv"), row.names = FALSE)
 write.csv(ext_by_dir, file.path(MLOUT, "external_by_direction.csv"), row.names = FALSE)
@@ -431,7 +482,7 @@ write.csv(bind_rows(ext_preds),  file.path(MLOUT, "predictions_external.csv"), r
 write.csv(bind_rows(loocv_preds), file.path(MLOUT, "predictions_LOOCV.csv"), row.names = FALSE)
 
 cat("\n========== METRICS SUMMARY ==========\n")
-cat("\n--- External Validation (PRIMARY, per direction) ---\n")
+cat("\n--- External Validation (PRIMARY, per direction x normalization) ---\n")
 print(as.data.frame(ext_by_dir))
 cat("\n--- LOOCV (SECONDARY, reference only) ---\n")
 print(as.data.frame(ml_metrics_loocv))
@@ -478,17 +529,23 @@ plot_rocs <- function(pred_df, outfile, title_suffix) {
   ggsave(outfile, p, width = 10, height = 7, dpi = 300)
 }
 
-plot_rocs(bind_rows(ext_preds),  file.path(MLOUT, "ROC_external.png"),
-          "Cross-Dataset Validation (Primary)")
+ext_all <- bind_rows(ext_preds)
+
+plot_rocs(ext_all %>% filter(normalization == "target_z"),
+          file.path(MLOUT, "ROC_external.png"),
+          "Cross-Dataset Validation — target-domain z (Primary)")
+plot_rocs(ext_all %>% filter(normalization == "train_stats"),
+          file.path(MLOUT, "ROC_external_trainstats.png"),
+          "Cross-Dataset Validation — training-stat z (Strict)")
 plot_rocs(bind_rows(loocv_preds), file.path(MLOUT, "ROC_LOOCV.png"),
-          "Within-Dataset LOOCV (Secondary)")
+          "Within-cell-line LOOCV (Secondary)")
 
 # ============================================================
-# 8. Confusion matrix heatmap (External, K = 100)
+# 8. Confusion matrix heatmap (External, target_z, K = CONFUSION_K)
 # ============================================================
-best_K <- 100
-conf_plot_df <- bind_rows(ext_preds) %>%
-  filter(K == best_K) %>%
+CONFUSION_K <- 100
+conf_plot_df <- ext_all %>%
+  filter(K == CONFUSION_K, normalization == "target_z") %>%
   mutate(pred = factor(ifelse(prob >= 0.5, "Resistant", "Sensitive"),
                        levels = c("Resistant", "Sensitive")),
          true = factor(condition, levels = c("Resistant", "Sensitive"))) %>%
@@ -501,7 +558,7 @@ if (nrow(conf_plot_df) > 0) {
     facet_wrap(~ model + direction, ncol = 2) +
     scale_fill_gradient(low = "#fdc086", high = "#e41a1c") +
     labs(x = "Predicted", y = "True", fill = "Count",
-         title = paste("Confusion Matrices — Cross-Dataset Validation (top-K =", best_K, ")")) +
+         title = paste("Confusion Matrices — Cross-Dataset (target_z, top-K =", CONFUSION_K, ")")) +
     theme_bw(base_size = 14) +
     theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
   ggsave(file.path(MLOUT, "confusion_external.png"), p_conf, width = 10, height = 8, dpi = 300)

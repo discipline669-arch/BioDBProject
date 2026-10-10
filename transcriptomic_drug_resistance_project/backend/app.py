@@ -20,11 +20,12 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # --------------------------------------------------------------------------
@@ -37,6 +38,7 @@ STATIC_DIR = BACKEND_DIR / "static"
 
 MODELS = ["LogisticRegression", "RandomForest", "SVM"]
 K_VALUES = [20, 50, 100, 200, 500]
+NORMALIZATIONS = ["target_z", "train_stats"]
 
 # --------------------------------------------------------------------------
 # App
@@ -58,39 +60,40 @@ app.add_middleware(
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
-def _path(name: str) -> Path:
-    p = MLOUT / name
-    if not p.exists():
-        raise HTTPException(status_code=404, detail=f"Missing artifact: {p}")
-    return p
-
-
 def _read_csv(name: str) -> pd.DataFrame:
-    return pd.read_csv(_path(name))
+    path = MLOUT / name
+    if not path.exists():
+        raise FileNotFoundError(f"Missing artifact: {path}")
+    return pd.read_csv(path)
 
 
-def _records(df: pd.DataFrame) -> list[dict]:
+def _records(df: pd.DataFrame) -> list[dict[str, Any]]:
     # to_json maps NaN -> null, which is valid JSON (unlike json.dumps on NaN).
-    return json.loads(df.to_json(orient="records"))
+    payload = df.to_json(orient="records")
+    if payload is None:
+        return []
+    return json.loads(payload)
+
+
+def _read_records(name: str) -> list[dict[str, Any]]:
+    return _records(_read_csv(name))
 
 
 def _gene_count() -> int | None:
     """Count gene columns from the wide CSV header without loading the matrix."""
-    p = MLOUT / "expression_matrix.csv"
-    if not p.exists():
+    path = MLOUT / "expression_matrix.csv"
+    if not path.exists():
         return None
-    with p.open() as fh:
+    with path.open() as fh:
         header = fh.readline().rstrip("\n").rstrip("\r")
-    if not header:
-        return None
-    return max(header.count(",") , 0)
+    return header.count(",") if header else None
 
 
 # --------------------------------------------------------------------------
 # API
 # --------------------------------------------------------------------------
 @app.get("/api/health")
-def health() -> dict:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "project_root": str(PROJECT_ROOT),
@@ -100,17 +103,16 @@ def health() -> dict:
 
 
 @app.get("/api/summary")
-def summary() -> dict:
+def summary() -> dict[str, Any]:
     labels = _read_csv("labels.csv")
     ext = _read_csv("external_by_direction.csv")
-    loocv = _read_csv("ml_metrics_summary.csv")
-    loocv = loocv[loocv["validation"] == "LOOCV"]
+    mm = _read_csv("ml_metrics_summary.csv")
+    loocv = mm[mm["validation"] == "LOOCV"]
 
-    best_ext = (
-        ext.sort_values("ROC_AUC", ascending=False)
-        .head(1)[["model", "K", "direction", "Accuracy", "ROC_AUC"]]
-        .to_dict("records")
-    )
+    tz = ext.query("normalization == 'target_z'")
+    ts = ext.query("normalization == 'train_stats'")
+    best = tz.sort_values(by="ROC_AUC", ascending=False).head(1)
+    best_strict = ts.sort_values(by="ROC_AUC", ascending=False).head(1)
 
     return {
         "n_samples": int(len(labels)),
@@ -120,29 +122,34 @@ def summary() -> dict:
         "conditions": labels["condition"].value_counts().to_dict(),
         "models": MODELS,
         "k_values": K_VALUES,
+        "normalizations": NORMALIZATIONS,
         "directions": sorted(ext["direction"].unique().tolist()),
         "loocv_min_auc": float(loocv["ROC_AUC"].min()) if len(loocv) else None,
         "loocv_min_accuracy": float(loocv["Accuracy"].min()) if len(loocv) else None,
-        "best_external": best_ext[0] if best_ext else None,
+        "best_external": _records(best)[0] if len(best) else None,
+        "best_external_train_stats": _records(best_strict)[0] if len(best_strict) else None,
     }
 
 
 @app.get("/api/external")
-def external() -> list[dict]:
-    df = _read_csv("external_by_direction.csv")
-    return _records(df.sort_values(["model", "K", "direction"]))
+def external(
+    normalization: str | None = Query(default="target_z"),
+) -> list[dict[str, Any]]:
+    rows = _read_records("external_by_direction.csv")
+    if normalization:
+        rows = [r for r in rows if r.get("normalization") == normalization]
+    return rows
 
 
 @app.get("/api/metrics")
-def metrics() -> list[dict]:
-    df = _read_csv("ml_metrics_summary.csv")
-    return _records(df)
+def metrics() -> list[dict[str, Any]]:
+    return _read_records("ml_metrics_summary.csv")
 
 
 @app.get("/api/loocv")
-def loocv() -> list[dict]:
-    df = _read_csv("ml_metrics_summary.csv")
-    return _records(df[df["validation"] == "LOOCV"].sort_values(["model", "K"]))
+def loocv() -> list[dict[str, Any]]:
+    rows = _read_records("ml_metrics_summary.csv")
+    return [r for r in rows if r.get("validation") == "LOOCV"]
 
 
 @app.get("/api/predictions/external")
@@ -150,66 +157,70 @@ def predictions_external(
     model: str | None = Query(default=None),
     k: int | None = Query(default=None),
     direction: str | None = Query(default=None),
-) -> list[dict]:
-    df = _read_csv("predictions_external.csv")
+    normalization: str | None = Query(default="target_z"),
+) -> list[dict[str, Any]]:
+    rows = _read_records("predictions_external.csv")
+    if normalization:
+        rows = [r for r in rows if r.get("normalization") == normalization]
     if model:
-        df = df[df["model"] == model]
+        rows = [r for r in rows if r["model"] == model]
     if k is not None:
-        df = df[df["K"] == k]
+        rows = [r for r in rows if r["K"] == k]
     if direction:
-        df = df[df["direction"] == direction]
-    return _records(df)
+        rows = [r for r in rows if r["direction"] == direction]
+    return rows
 
 
 @app.get("/api/predictions/loocv")
 def predictions_loocv(
     model: str | None = Query(default=None),
     k: int | None = Query(default=None),
-) -> list[dict]:
-    df = _read_csv("predictions_LOOCV.csv")
+) -> list[dict[str, Any]]:
+    rows = _read_records("predictions_LOOCV.csv")
     if model:
-        df = df[df["model"] == model]
+        rows = [r for r in rows if r["model"] == model]
     if k is not None:
-        df = df[df["K"] == k]
-    return _records(df)
+        rows = [r for r in rows if r["K"] == k]
+    return rows
 
 
 @app.get("/api/biomarkers")
-def biomarkers(limit: int = Query(default=30, ge=1, le=500)) -> list[dict]:
-    df = _read_csv("biomarker_panel.csv")
-    return _records(df.head(limit))
+def biomarkers(limit: int = Query(default=30, ge=1, le=500)) -> list[dict[str, Any]]:
+    return _read_records("biomarker_panel.csv")[:limit]
 
 
 @app.get("/api/feature-importance")
-def feature_importance(limit: int = Query(default=25, ge=1, le=500)) -> list[dict]:
-    df = _read_csv("feature_importance.csv")
-    top_genes = (
-        df.groupby("gene")["mean_selection_freq"].mean()
-        .sort_values(ascending=False)
-        .head(limit)
-        .index
+def feature_importance(limit: int = Query(default=25, ge=1, le=500)) -> dict[str, Any]:
+    rows_all = _read_records("feature_importance.csv")
+
+    agg: dict[str, list[float]] = {}
+    for r in rows_all:
+        v = r.get("mean_selection_freq")
+        if v is not None:
+            agg.setdefault(r["gene"], []).append(float(v))
+
+    ranked = sorted(
+        agg.items(), key=lambda kv: sum(kv[1]) / len(kv[1]), reverse=True
     )
-    sub = df[df["gene"].isin(top_genes)].sort_values(
-        ["gene", "model"]
-    )
-    return {
-        "genes": top_genes.tolist(),
-        "rows": _records(sub),
-    }
+    top_genes = [gene for gene, _ in ranked[:limit]]
+    keep = set(top_genes)
+    rows = [r for r in rows_all if r["gene"] in keep]
+    return {"genes": top_genes, "rows": rows}
 
 
 @app.get("/api/files")
-def files() -> list[dict]:
+def files() -> list[dict[str, Any]]:
     if not MLOUT.is_dir():
         return []
-    out = []
+    out: list[dict[str, Any]] = []
     for p in sorted(MLOUT.iterdir()):
         if p.is_file():
+            st = p.stat()
             out.append(
                 {
                     "name": p.name,
-                    "size": p.stat().st_size,
-                    "modified": p.stat().st_mtime,
+                    "size": st.st_size,
+                    "modified": st.st_mtime,
                     "kind": "plot" if p.suffix.lower() == ".png" else "data",
                 }
             )
@@ -229,7 +240,7 @@ if STATIC_DIR.is_dir():
 def index() -> FileResponse:
     idx = STATIC_DIR / "index.html"
     if not idx.exists():
-        raise HTTPException(status_code=404, detail="dashboard not found")
+        raise FileNotFoundError("dashboard not found")
     return FileResponse(idx)
 
 

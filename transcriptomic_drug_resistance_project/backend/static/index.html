@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ovarian Cancer Drug-Resistance — ML Results</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1720; --panel:#162130; --panel2:#1d2b3d; --line:#2b3b50;
+    --ink:#e8eef6; --muted:#93a4b8; --accent:#4ea1ff;
+    --lr:#377eb8; --rf:#4daf4a; --svm:#e41a1c;
+    --sens:#93a4b8; --res:#ff9f43;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif}
+  header{padding:20px 28px;border-bottom:1px solid var(--line);
+         background:linear-gradient(180deg,#162130,#0f1720)}
+  header h1{margin:0;font-size:20px}
+  header p{margin:4px 0 0;color:var(--muted)}
+  main{padding:22px 28px 60px;max-width:1240px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  .card .v{font-size:22px;font-weight:600;margin-top:4px}
+  .card .s{color:var(--muted);font-size:12px;margin-top:2px}
+  section{margin-top:26px}
+  h2{font-size:15px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+     border-bottom:1px solid var(--line);padding-bottom:8px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:900px){.grid2{grid-template-columns:1fr}}
+  .chartwrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .chartwrap h3{margin:0 0 10px;font-size:13px;color:var(--muted);font-weight:600}
+  canvas{max-width:100%}
+  .toggle{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .toggle button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+                 border-radius:20px;padding:5px 14px;cursor:pointer;font-size:13px}
+  .toggle button.active{background:var(--accent);border-color:var(--accent);color:#04121f;font-weight:600}
+  .controls{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;align-items:end}
+  .controls label{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:12px}
+  select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+         border-radius:8px;padding:6px 10px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:7px 10px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  thead th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--panel)}
+  tbody tr:hover{background:var(--panel2)}
+  .tablewrap{max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel)}
+  .pill{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px}
+  .pill.high{background:#1e4d2b;color:#9be7b0}
+  .pill.mid{background:#4d3d1e;color:#ffd08a}
+  .pill.low{background:#4d1e1e;color:#ff9b9b}
+  .plots{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .plots img{width:100%;border:1px solid var(--line);border-radius:12px;background:#fff}
+  .muted{color:var(--muted)}
+  .note{color:var(--muted);font-size:12px;margin-top:6px}
+  #err{background:#4d1e1e;border:1px solid #7a2d2d;color:#ffc9c9;padding:10px 14px;
+       border-radius:10px;margin-bottom:14px;display:none}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Ovarian Cancer Drug-Resistance — ML Results</h1>
+  <p>Cross-dataset classifiers over <code>results/ml/</code>. Primary external results use <b>target_z</b> (test cell line z-scored with its own statistics, transductive); <b>train_stats</b> is the strictly non-transductive sensitivity check. LOOCV is now a within-cell-line reference.</p>
+</header>
+
+<main>
+  <div id="err"></div>
+
+  <section>
+    <div class="cards" id="cards"></div>
+  </section>
+
+  <section>
+    <h2>Cross-dataset ROC-AUC by top-K</h2>
+    <div class="chartwrap">
+      <div class="toggle" id="dirToggle"></div>
+      <div class="toggle" id="normToggle"></div>
+      <h3 id="aucTitle">AUC by model and K</h3>
+      <canvas id="aucChart" height="120"></canvas>
+      <div class="note">Grouped bars: one series per model, for the selected train→test direction and normalization. <b>target_z</b> = test line z-scored with its own statistics (transductive). <b>train_stats</b> = test line z-scored with training statistics (strict, leak-free). K is on the x-axis.</div>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="chartwrap">
+      <h3>LOOCV (within-study, n=12)</h3>
+      <canvas id="loocvChart" height="160"></canvas>
+    </div>
+    <div class="chartwrap">
+      <h3>Top candidate biomarkers — mean selection frequency</h3>
+      <canvas id="panelChart" height="160"></canvas>
+    </div>
+  </section>
+
+  <section>
+    <h2>Prediction explorer (external)</h2>
+    <div class="chartwrap">
+      <div class="controls">
+        <label>Direction
+          <select id="pdDir"></select>
+        </label>
+        <label>Model
+          <select id="pdModel"></select>
+        </label>
+        <label>Top-K
+          <select id="pdK"></select>
+        </label>
+        <label>Normalization
+          <select id="pdNorm"></select>
+        </label>
+      </div>
+      <canvas id="predChart" height="110"></canvas>
+      <div class="note">Per-sample predicted P(Resistant) on the held-out cell line. Dashed line = 0.5 decision threshold. Colour = true label.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>External metrics by direction</h2>
+    <div class="controls">
+      <label>Normalization
+        <select id="extNorm"></select>
+      </label>
+    </div>
+    <div class="tablewrap"><table id="extTable">
+      <thead><tr>
+        <th>Model</th><th>K</th><th>Direction</th><th>Norm</th><th>n</th>
+        <th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th><th>ROC-AUC</th>
+      </tr></thead><tbody></tbody>
+    </table></div>
+    <div class="note">AUC colour: <span class="pill high">&ge;0.8</span> <span class="pill mid">0.6–0.8</span> <span class="pill low">&lt;0.6</span>. Small n (6/test) makes these noisy. <b>train_stats</b> columns are the leak-free numbers (test line normalized with training statistics).</div>
+  </section>
+
+  <section>
+    <h2>Biomarker panel</h2>
+    <div class="tablewrap"><table id="bioTable">
+      <thead><tr>
+        <th>Rank</th><th>Gene</th><th>Slots (of 15)</th><th>Mean freq</th>
+        <th>Mean |log2FC|</th><th>|log2FC| DS1</th><th>|log2FC| DS2</th>
+      </tr></thead><tbody></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>Figures (PNG)</h2>
+    <div class="plots">
+      <figure><img src="/images/ROC_external.png" alt="ROC external"><figcaption class="muted">ROC — external, target_z (primary)</figcaption></figure>
+      <figure><img src="/images/ROC_external_trainstats.png" alt="ROC external strict"><figcaption class="muted">ROC — external, train_stats (strict)</figcaption></figure>
+      <figure><img src="/images/ROC_LOOCV.png" alt="ROC LOOCV"><figcaption class="muted">ROC — LOOCV (within-cell-line)</figcaption></figure>
+      <figure><img src="/images/confusion_external.png" alt="Confusion external"><figcaption class="muted">Confusion — external (target_z)</figcaption></figure>
+      <figure><img src="/images/feature_importance.png" alt="Feature importance"><figcaption class="muted">Feature importance (cross-dataset)</figcaption></figure>
+    </div>
+  </section>
+
+  <p class="note">API docs: <a href="/docs">/docs</a> · endpoints: <a href="/api/summary">/api/summary</a>, <a href="/api/external">/api/external</a> (<code>?normalization=target_z|train_stats</code>), <a href="/api/loocv">/api/loocv</a>, <a href="/api/biomarkers">/api/biomarkers</a>, <a href="/api/predictions/external">/api/predictions/external</a></p>
+</main>
+
+<script>
+const MODEL_COLORS = {LogisticRegression:"#377eb8", RandomForest:"#4daf4a", SVM:"#e41a1c"};
+const $ = (s) => document.querySelector(s);
+const fmt3 = (x) => (x === null || x === undefined || Number.isNaN(x)) ? "—" : Number(x).toFixed(3);
+const fmtInt = (x) => (x === null || x === undefined) ? "—" : Number(x).toLocaleString();
+
+function fail(msg){ const e=$("#err"); e.style.display="block"; e.textContent = "Error: " + msg; }
+async function getJSON(url){ const r = await fetch(url); if(!r.ok) throw new Error(url+" -> "+r.status); return r.json(); }
+
+function aucClass(a){ if(a>=0.8) return "high"; if(a>=0.6) return "mid"; return "low"; }
+
+/* ---------- cards ---------- */
+function renderCards(s){
+  const best = s.best_external;
+  const strict = s.best_external_train_stats;
+  const cards = [
+    ["Samples", fmtInt(s.n_samples), (s.n_datasets||"?")+" datasets"],
+    ["Genes", fmtInt(s.n_genes), "intersected (log2 CPM+1)"],
+    ["Models", (s.models||[]).length, (s.models||[]).join(" · ")],
+    ["Top-K grid", (s.k_values||[]).length, "K = "+(s.k_values||[]).join(", ")],
+    ["Best external AUC", best?fmt3(best.ROC_AUC):"—", best?`${best.model} · K=${best.K} · target_z`:"n/a"],
+    ["Best external dir.", best?best.direction:"—", best?`acc ${fmt3(best.Accuracy)}`:"n/a"],
+    ["Best strict AUC", strict?fmt3(strict.ROC_AUC):"—", strict?`${strict.model} · K=${strict.K} · train_stats`:"n/a"],
+    ["LOOCV min AUC", fmt3(s.loocv_min_auc), "within-cell-line reference"],
+  ];
+  $("#cards").innerHTML = cards.map(([k,v,sub])=>
+    `<div class="card"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub||""}</div></div>`).join("");
+}
+
+/* ---------- AUC-by-K chart with direction + normalization toggles ---------- */
+let aucChart=null, EXT=[], CUR_DIR=null, CUR_NORM="target_z";
+
+function renderAucChart(){
+  const byModelK = {};
+  EXT.filter(r=>r.direction===CUR_DIR && r.normalization===CUR_NORM).forEach(r=>{
+    (byModelK[r.model] ||= {})[r.K] = r.ROC_AUC;
+  });
+  const Ks = [...new Set(EXT.map(r=>r.K))].sort((a,b)=>a-b);
+  const models = [...new Set(EXT.map(r=>r.model))];
+  const datasets = models.map(m=>({
+    label:m, backgroundColor:MODEL_COLORS[m]||"#888", borderRadius:4,
+    data: Ks.map(k => (byModelK[m]&&byModelK[m][k]!=null)? byModelK[m][k] : null)
+  }));
+  $("#aucTitle").textContent = `AUC by model and K — ${CUR_DIR} — ${CUR_NORM}`;
+  if(aucChart) aucChart.destroy();
+  aucChart = new Chart($("#aucChart"), {
+    type:"bar",
+    data:{ labels:Ks.map(k=>"K="+k), datasets },
+    options:{
+      responsive:true, maintainAspectRatio:true,
+      scales:{ y:{min:0,max:1,ticks:{color:"#93a4b8"},grid:{color:"#2b3b50"}},
+               x:{ticks:{color:"#93a4b8"},grid:{display:false}} },
+      plugins:{ legend:{labels:{color:"#e8eef6"}},
+                tooltip:{callbacks:{label:c=>`${c.dataset.label}: AUC ${fmt3(c.parsed.y)}`}} }
+    }
+  });
+}
+
+function setupDirToggle(){
+  const dirs = [...new Set(EXT.map(r=>r.direction))];
+  CUR_DIR = dirs[0];
+  const box = $("#dirToggle"); box.innerHTML="";
+  dirs.forEach(d=>{
+    const b=document.createElement("button");
+    b.textContent=d; b.className=(d===CUR_DIR?"active":"");
+    b.onclick=()=>{ CUR_DIR=d; [...box.children].forEach(c=>c.className=(c.textContent===d?"active":"")); renderAucChart(); };
+    box.appendChild(b);
+  });
+}
+
+function setupNormToggle(){
+  const norms = [...new Set(EXT.map(r=>r.normalization))];
+  if(norms.includes("target_z")) CUR_NORM="target_z"; else CUR_NORM=norms[0];
+  const box = $("#normToggle"); box.innerHTML="";
+  norms.forEach(n=>{
+    const b=document.createElement("button");
+    b.textContent=n; b.className=(n===CUR_NORM?"active":"");
+    b.onclick=()=>{ CUR_NORM=n; [...box.children].forEach(c=>c.className=(c.textContent===n?"active":"")); renderAucChart(); };
+    box.appendChild(b);
+  });
+}
+
+/* ---------- LOOCV ---------- */
+async function renderLoocv(){
+  const rows = await getJSON("/api/loocv");
+  const models = [...new Set(rows.map(r=>r.model))];
+  const Ks = [...new Set(rows.map(r=>r.K))].sort((a,b)=>a-b);
+  const get=(m,k)=>{ const r=rows.find(x=>x.model===m&&x.K===k); return r?(r.ROC_AUC):null; };
+  new Chart($("#loocvChart"), {
+    type:"bar",
+    data:{ labels:Ks.map(k=>"K="+k),
+      datasets: models.map(m=>({label:m, backgroundColor:MODEL_COLORS[m]||"#888",
+        borderRadius:4, data:Ks.map(k=>get(m,k))})) },
+    options:{ responsive:true,
+      scales:{ y:{min:0,max:1,ticks:{color:"#93a4b8"},grid:{color:"#2b3b50"}},
+               x:{ticks:{color:"#93a4b8"},grid:{display:false}} },
+      plugins:{ legend:{labels:{color:"#e8eef6"}} } }
+  });
+}
+
+/* ---------- biomarker panel bar ---------- */
+async function renderPanel(){
+  const rows = await getJSON("/api/biomarkers?limit=15");
+  new Chart($("#panelChart"), {
+    type:"bar",
+    data:{ labels: rows.map(r=>r.gene),
+      datasets:[{ label:"mean selection freq", backgroundColor:"#4ea1ff", borderRadius:4,
+        data: rows.map(r=>r.mean_freq) }] },
+    options:{ indexAxis:"y", responsive:true,
+      scales:{ x:{min:0,max:1,ticks:{color:"#93a4b8"},grid:{color:"#2b3b50"}},
+               y:{ticks:{color:"#93a4b8"},grid:{display:false}} },
+      plugins:{ legend:{display:false} } }
+  });
+}
+
+/* ---------- prediction explorer ---------- */
+let PRED=[], predChart=null;
+async function loadPreds(){
+  const [tz, ts] = await Promise.all([
+    getJSON("/api/predictions/external?normalization=target_z"),
+    getJSON("/api/predictions/external?normalization=train_stats"),
+  ]);
+  PRED = [...tz, ...ts];
+}
+function renderPredChart(){
+  const dir=$("#pdDir").value, model=$("#pdModel").value, k=+$("#pdK").value, norm=$("#pdNorm").value;
+  const rows = PRED.filter(r=>r.direction===dir&&r.model===model&&r.K===k&&r.normalization===norm);
+  rows.sort((a,b)=>(a.prob-b.prob));
+  const labels = rows.map(r=>r.sample.replace(/_(SKOV3|OVCAR5|SKOV3)/,""));
+  const colors = rows.map(r=> r.condition==="Resistant" ? "#ff9f43" : "#93a4b8");
+  const threshold = { id:"thr", afterDraw(c){
+      const {ctx,chartArea:{top,bottom},scales:{y}}=c;
+      if(!y) return; const yy=y.getPixelForValue(0.5);
+      ctx.save(); ctx.setLineDash([5,5]); ctx.strokeStyle="#e8eef6";
+      ctx.beginPath(); ctx.moveTo(c.chartArea.left,yy); ctx.lineTo(c.chartArea.right,yy); ctx.stroke(); ctx.restore();
+  }};
+  if(predChart) predChart.destroy();
+  predChart = new Chart($("#predChart"), {
+    type:"bar",
+    data:{ labels, datasets:[{label:"P(Resistant)", backgroundColor:colors, borderRadius:4,
+      data: rows.map(r=>r.prob) }] },
+    options:{ responsive:true,
+      scales:{ y:{min:0,max:1,ticks:{color:"#93a4b8"},grid:{color:"#2b3b50"}},
+               x:{ticks:{color:"#93a4b8"},grid:{display:false}} },
+      plugins:{ legend:{display:false},
+        tooltip:{callbacks:{label:c=>{ const r=rows[c.dataIndex];
+          return `${r.condition} · prob ${fmt3(r.prob)}`;}}} } },
+    plugins:[threshold]
+  });
+}
+function setupPredControls(){
+  const dirs=[...new Set(PRED.map(r=>r.direction))];
+  const models=[...new Set(PRED.map(r=>r.model))];
+  const Ks=[...new Set(PRED.map(r=>r.K))].sort((a,b)=>a-b);
+  const norms=[...new Set(PRED.map(r=>r.normalization))];
+  const fill=(sel,vals)=>{ sel.innerHTML=vals.map(v=>`<option value="${v}">${v}</option>`).join(""); };
+  fill($("#pdDir"),dirs); fill($("#pdModel"),models); fill($("#pdK"),Ks); fill($("#pdNorm"),norms);
+  if(norms.includes("target_z")) $("#pdNorm").value="target_z";
+  ["#pdDir","#pdModel","#pdK","#pdNorm"].forEach(s=>$(s).addEventListener("change",renderPredChart));
+  renderPredChart();
+}
+
+/* ---------- tables ---------- */
+function renderExtTable(){
+  const norm = $("#extNorm").value || "target_z";
+  const rows = EXT.filter(r=>r.normalization===norm);
+  rows.sort((a,b)=> a.model.localeCompare(b.model) || a.K-b.K || a.direction.localeCompare(b.direction));
+  $("#extTable tbody").innerHTML = rows.map(r=>{
+    const cls=aucClass(r.ROC_AUC);
+    return `<tr><td>${r.model}</td><td>${r.K}</td><td>${r.direction}</td><td>${r.normalization}</td><td>${r.n}</td>
+      <td>${fmt3(r.Accuracy)}</td><td>${fmt3(r.Precision)}</td><td>${fmt3(r.Recall)}</td>
+      <td>${fmt3(r.F1)}</td><td><span class="pill ${cls}">${fmt3(r.ROC_AUC)}</span></td></tr>`;
+  }).join("");
+}
+function setupExtNorm(){
+  const norms=[...new Set(EXT.map(r=>r.normalization))];
+  const sel=$("#extNorm");
+  sel.innerHTML=norms.map(n=>`<option value="${n}">${n}</option>`).join("");
+  if(norms.includes("target_z")) sel.value="target_z";
+  sel.addEventListener("change",renderExtTable);
+}
+async function renderBioTable(){
+  const rows = await getJSON("/api/biomarkers?limit=30");
+  $("#bioTable tbody").innerHTML = rows.map(r=>
+    `<tr><td>${r.rank}</td><td>${r.gene}</td><td>${r.n_select_slots}</td>
+     <td>${fmt3(r.mean_freq)}</td><td>${fmt3(r.mean_abs_lfc)}</td>
+     <td>${fmt3(r.log2fc_mag_ds1)}</td><td>${fmt3(r.log2fc_mag_ds2)}</td></tr>`).join("");
+}
+
+/* ---------- boot ---------- */
+(async function boot(){
+  try{
+    const [s, extTz, extTs] = await Promise.all([
+      getJSON("/api/summary"),
+      getJSON("/api/external?normalization=target_z"),
+      getJSON("/api/external?normalization=train_stats"),
+    ]);
+    renderCards(s);
+    EXT = [...extTz, ...extTs];
+    setupDirToggle(); setupNormToggle(); renderAucChart();
+    setupExtNorm(); renderExtTable();
+    await Promise.all([renderLoocv(), renderPanel(), renderBioTable()]);
+    await loadPreds(); setupPredControls();
+  }catch(e){ fail(e.message); }
+})();
+</script>
+</body>
+</html>

@@ -266,13 +266,14 @@ if (file.exists(f)) cat(sprintf('<div class="fig-container"><img src="%s" alt="K
 
 ## Overview
 
-The **418 consistently regulated shared DEGs** (198 up + 220 down; mixed-direction genes excluded) were used as candidate features to build classification models distinguishing **Resistant** from **Sensitive** samples across both datasets (12 samples total).
+The models are trained on the **full intersected gene space** (57,357 genes present in both datasets), not on a pre-selected DEG panel — feature selection is nested inside each training fold to avoid leakage. The 418 consistently regulated shared DEGs (198 up + 220 down) remain a reference panel only.
 
-- **Feature matrix:** `results/ml/expression_matrix.csv` (12 samples × genes, `log2(CPM+1)`)
-- **Models:** Logistic Regression (L1, glmnet), Random Forest (ranger), SVM (radial, e1071)
-- **Nested feature selection:** within every training fold, top-K genes by |t-statistic| (K ∈ {10, 20, 30}) — no test information used
+- **Feature matrix:** `results/ml/expression_matrix.rds` (12 samples × 57,357 genes, `log2(CPM+1)`)
+- **Models:** Logistic Regression (ridge / L2, glmnet), Random Forest (ranger), SVM (radial, e1071)
+- **Nested feature selection:** within every training fold, top-K genes by |t-statistic| (K ∈ {20, 50, 100, 200, 500}) — no test information used
+- **Cross-dataset normalization:** fold-aware per-gene z-scoring. External results are reported under two schemes: `target_z` (test line standardized with its own statistics; transductive) and `train_stats` (test line standardized with training statistics; strictly non-transductive).
 - **Validation:**
-  1. **LOOCV** across all 12 samples
+  1. **Within-cell-line LOOCV** — leave-one-out inside each cell line (5 training samples per fold)
   2. **Leave-one-dataset-out** external validation — train on one cell line, predict the other
 
 > Because n = 12 (6 per cell line), these results are **exploratory biomarker discovery**, not clinical validation (proposal §7).
@@ -281,10 +282,10 @@ The **418 consistently regulated shared DEGs** (198 up + 220 down; mixed-directi
 
 ```{r ml_metrics}
 ml_metrics <- read.csv(file.path(RESULTS, "ml", "ml_metrics_summary.csv"))
-kable(ml_metrics %>% filter(K == 20) %>%
-        select(validation, model, Accuracy, Precision, Recall, F1, ROC_AUC),
+kable(ml_metrics %>% filter(K == 20, validation == "External") %>%
+        select(validation, normalization, direction, model, Accuracy, Precision, Recall, F1, ROC_AUC),
       digits = 3, row.names = FALSE,
-      col.names = c("Validation", "Model", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC"))
+      col.names = c("Validation", "Normalization", "Train→Test", "Model", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC"))
 ```
 
 <details><summary>All model / K combinations</summary>
@@ -300,9 +301,18 @@ kable(ml_metrics, digits = 3, row.names = FALSE)
 ```{r ml_external_dir}
 ext_dir <- read.csv(file.path(RESULTS, "ml", "external_by_direction.csv"))
 kable(ext_dir %>% filter(K == 20) %>%
-        select(direction, model, Accuracy, ROC_AUC),
+        select(normalization, direction, model, Accuracy, ROC_AUC),
       digits = 3, row.names = FALSE,
-      col.names = c("Train→Test", "Model", "Accuracy", "ROC-AUC"))
+      col.names = c("Normalization", "Train→Test", "Model", "Accuracy", "ROC-AUC"))
+```
+
+## Within-Cell-Line LOOCV (top-K = 20)
+
+```{r ml_loocv}
+kable(ml_metrics %>% filter(K == 20, validation == "LOOCV") %>%
+        select(model, Accuracy, Precision, Recall, F1, ROC_AUC),
+      digits = 3, row.names = FALSE,
+      col.names = c("Model", "Accuracy", "Precision", "Recall", "F1", "ROC-AUC"))
 ```
 
 ## ROC Curves (LOOCV)
@@ -315,14 +325,16 @@ if (file.exists(f)) cat(sprintf('<div class="fig-container"><img src="%s" alt="R
 ## ROC Curves (External Validation)
 
 ```{r ml_roc_ext, echo=FALSE, results='asis'}
-f <- file.path(RESULTS, "ml", "ROC_external.png")
-if (file.exists(f)) cat(sprintf('<div class="fig-container"><img src="%s" alt="ROC External"></div>', f))
+for (nm in c("ROC_external.png", "ROC_external_trainstats.png")) {
+  f <- file.path(RESULTS, "ml", nm)
+  if (file.exists(f)) cat(sprintf('<div class="fig-container"><img src="%s" alt="ROC External"></div>', f))
+}
 ```
 
-## Confusion Matrices (LOOCV)
+## Confusion Matrices (External Validation)
 
 ```{r ml_confusion, echo=FALSE, results='asis'}
-f <- file.path(RESULTS, "ml", "confusion_LOOCV.png")
+f <- file.path(RESULTS, "ml", "confusion_external.png")
 if (file.exists(f)) cat(sprintf('<div class="fig-container"><img src="%s" alt="Confusion Matrix"></div>', f))
 ```
 
@@ -345,9 +357,9 @@ kable(head(panel[, c("rank", "gene", "n_select_slots", "mean_abs_lfc",
 
 ## Interpretation & Caveats
 
-1. LOOCV accuracy/AUC reflects within-study discrimination and is expected to be optimistic relative to true generalization.
-2. The **external validation** is the more stringent test: training on 6 samples of one cell line and predicting the other. Results should be interpreted as exploratory given the small n.
-3. Feature/gene selection for the ML models was performed strictly *inside* each training fold to prevent label leakage; the initial 418-gene candidate space itself derives from the DESeq2 cross-dataset validation step.
+1. **Within-cell-line LOOCV** reflects within-study discrimination and is expected to be optimistic relative to true generalization (it no longer pools the two cell lines).
+2. The **external validation** is the more stringent test: training on 6 samples of one cell line and predicting the other. Results should be interpreted as exploratory given the small n. The `train_stats` scheme is the strictly non-transductive (leak-free) version; `target_z` standardizes the held-out line with its own statistics and is transductive.
+3. Feature/gene selection and normalization for the ML models were performed strictly *inside* each training fold to prevent leakage; the initial candidate space is the full intersected gene set (no DEG pre-filtering).
 4. Different cell-line backgrounds (SKOV-3 vs OVCAR5) may inflate within-CV separability; cross-dataset consistency of the top biomarkers partially mitigates this.
 
 ---
@@ -467,12 +479,12 @@ These findings collectively define a **core cisplatin resistance transcriptomic 
 | `results/comparison/lfc_correlation.png` | log₂FC correlation plot |
 | `results/enrichment/*.csv` | GO and KEGG enrichment tables |
 | `results/enrichment/*.png` | GO and KEGG dot plots |
-| `results/ml/expression_matrix.csv` | 12-sample × gene ML feature matrix (log2 CPM+1) |
-| `results/ml/ml_metrics_summary.csv` | Model performance per model / top-K / validation |
-| `results/ml/predictions_LOOCV.csv` | LOOCV held-out predictions |
-| `results/ml/predictions_external.csv` | Leave-one-dataset-out predictions |
-| `results/ml/ROC_LOOCV.png` / `ROC_external.png` | ROC curves |
-| `results/ml/confusion_LOOCV.png` | Confusion matrix heatmaps |
+| `results/ml/expression_matrix.rds` | 12-sample × 57,357-gene ML feature matrix (log2 CPM+1) |
+| `results/ml/ml_metrics_summary.csv` | Model performance per model / top-K / validation / normalization |
+| `results/ml/predictions_LOOCV.csv` | Within-cell-line LOOCV held-out predictions |
+| `results/ml/predictions_external.csv` | Leave-one-dataset-out predictions (both normalizations) |
+| `results/ml/ROC_LOOCV.png` / `ROC_external.png` / `ROC_external_trainstats.png` | ROC curves |
+| `results/ml/confusion_external.png` | Confusion matrix heatmaps (external, target_z) |
 | `results/ml/feature_importance.csv` / `.png` | Feature selection frequencies |
 | `results/ml/biomarker_panel.csv` | Top-ranked candidate biomarker panel |
 

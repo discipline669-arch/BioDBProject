@@ -9,6 +9,10 @@ embedded in `scripts/DEG_Report.Rmd` → `DEG_Report.html`.
 > (scrambled gene labels, a 30-min `read.csv` hang, NULL model seeds, a
 > no-split Random Forest, lasso degeneracy at n = 6, an invalid pooled external
 > metric, and cross-dataset scale mismatch).
+>
+> A follow-up methodology pass (see `documents/updated_plan.md`) made
+> normalization fold-aware and reported a second, strictly non-transductive
+> external scheme. See §3 for details.
 
 ---
 
@@ -17,8 +21,9 @@ embedded in `scripts/DEG_Report.Rmd` → `DEG_Report.html`.
 Build supervised classifiers that distinguish **cisplatin-resistant** from
 **cisplatin-sensitive** ovarian cancer cells and rank a small, interpretable
 candidate **biomarker panel** (proposal §7, §10). The design prioritises
-**leakage-free cross-dataset validation**: the primary evidence is how well a
-model trained on one cell line predicts the other.
+**cross-dataset validation**: the primary evidence is how well a model trained on
+one cell line predicts the other, reported under both a batch-corrected
+(`target_z`) and a strictly non-transductive (`train_stats`) normalization.
 
 ## 2. Inputs
 
@@ -43,22 +48,35 @@ The 418 consistently-regulated DEGs remain available as a reference panel only.
 
 - **Models:** Logistic Regression (ridge / L2, `glmnet`), Random Forest
   (`ranger`, `min.node.size = 1`), SVM radial (`e1071`).
-- **Cross-dataset normalization:** every gene is **z-scored within each dataset**
-  (centred/scaled across that dataset's own 6 samples) before feature selection.
-  This corrects the measured per-gene scale mismatch (variance 0.172 vs 0.047
-  between the two studies). It uses no labels and no cross-dataset held-out
-  information, so it remains leakage-free.
+- **Per-fold cross-dataset normalization:** the two studies were CPM-normalized
+  independently, so genes sit on different scales (measured variance 0.172 vs
+  0.047). Within each fold, **training rows are z-scored with training-row
+  statistics**, and two test-row normalizations are reported:
+  - **`target_z` (PRIMARY, transductive):** test rows are z-scored with the
+    **test cell line's own** mean/SD. This batch-corrects the two datasets and is
+    the reference result.
+  - **`train_stats` (secondary, strict):** test rows are z-scored with the
+    **training cell line's** mean/SD. It uses no information whatever from the
+    held-out dataset — the leak-free number.
+
+  The model is fit once per fold on the identically normalized training rows;
+  only test-row normalization differs between the two schemes. No labels are used
+  anywhere in normalization.
 - **Nested feature selection:** inside every training fold only, top-K genes by
   |two-sample t-statistic|, **K ∈ {20, 50, 100, 200, 500}**. Test folds never
   inform feature or model selection.
 - **Validation:**
   1. **PRIMARY — cross-dataset external:** train on all 6 samples of one cell
-     line, predict the other 6 (SKOV-3 → OVCAR5 and OVCAR5 → SKOV-3).
-  2. **SECONDARY — LOOCV** on all 12 samples (within-study reference only).
+     line, predict the other 6 (SKOV-3 → OVCAR5 and OVCAR5 → SKOV-3), under both
+     normalizations above.
+  2. **SECONDARY — within-cell-line LOOCV:** leave-one-out **inside each cell
+     line** (5 training samples, 1 held out), with feature selection and
+     normalization recomputed from the training samples only. Not a pooled
+     12-sample CV.
 - **Metrics:** Accuracy, Precision, Recall, F1, ROC-AUC. External metrics are
-  computed **per direction** (`external_by_direction.csv`). The two directions
-  have opposite probability scales, so pooling them into a single "External"
-  row is not interpretable and is not reported.
+  computed **per direction × normalization** (`external_by_direction.csv`). The
+  two directions have opposite probability scales, so pooling them into a single
+  "External" row is not interpretable and is not reported.
 - **Determinism:** fixed seeds per model; two consecutive runs produce
   byte-identical predictions and metrics.
 
@@ -107,27 +125,39 @@ Rscript -e 'rmarkdown::render("scripts/DEG_Report.Rmd")'
 | `expression_matrix.rds` | Sample × gene feature matrix (fast load) |
 | `expression_matrix.csv` | Same matrix, CSV sidecar |
 | `labels.csv` | Sample metadata / labels |
-| `ml_metrics_summary.csv` | Metrics per validation × model × top-K × direction |
-| `external_by_direction.csv` | **Primary** external metrics per train→test direction |
-| `predictions_external.csv` | Per-sample external predictions (180 rows) |
-| `predictions_LOOCV.csv` | Per-sample held-out LOOCV predictions (180 rows) |
-| `ROC_external.png`, `ROC_LOOCV.png` | ROC curves (external faceted by direction) |
-| `confusion_external.png` | External confusion matrix heatmaps |
+| `ml_metrics_summary.csv` | Metrics per validation × model × top-K × direction × normalization |
+| `external_by_direction.csv` | **Primary** external metrics per train→test direction × normalization (60 rows) |
+| `predictions_external.csv` | Per-sample external predictions, both normalizations (360 rows) |
+| `predictions_LOOCV.csv` | Per-sample held-out within-cell-line LOOCV predictions (180 rows) |
+| `ROC_external.png`, `ROC_external_trainstats.png`, `ROC_LOOCV.png` | ROC curves (external target_z, external strict, LOOCV) |
+| `confusion_external.png` | External confusion matrix heatmaps (target_z) |
 | `feature_importance.csv`, `feature_importance.png` | Selection frequencies per gene/model |
 | `biomarker_panel.csv` | Top-30 ranked candidate biomarkers |
 | `run_log.txt` | Full console log |
 
 ## 6. Results
 
-### 6.1 Within-study LOOCV (secondary, n = 12)
+### 6.1 Within-cell-line LOOCV (secondary, n = 12)
 
-All 3 models × 5 K values reach **Accuracy = 1.000 and ROC-AUC = 1.000**. The
-two phenotypes are trivially separable *within* each cell line; this reference
-therefore measures signal presence, not generalization.
+Leave-one-out inside each cell line, with preprocessing recomputed per fold
+(`ml_metrics_summary.csv`, `validation = LOOCV`):
 
-### 6.2 Cross-dataset external validation (primary, n = 6 train / 6 test)
+| Model | K = 20 | K = 50 | K = 100 | K = 200 | K = 500 |
+|---|---|---|---|---|---|
+| Logistic Regression (Acc / AUC) | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 | 1.000 / 1.000 |
+| Random Forest (Acc / AUC) | 1.000 / 1.000 | 1.000 / 1.000 | 0.917 / 1.000 | 0.917 / 0.972 | 0.917 / 1.000 |
+| SVM (Acc / AUC) | 1.000 / 1.000 | 1.000 / 1.000 | 0.833 / 0.972 | 0.833 / 0.972 | 0.833 / 0.889 |
 
-Accuracy / ROC-AUC per train → test direction (`external_by_direction.csv`):
+Minimum across the grid: **Accuracy 0.833, ROC-AUC 0.889**. The two phenotypes
+remain almost trivially separable *within* a cell line; because this CV no longer
+pools the two cell lines (and no longer lets the held-out sample contribute to
+its own normalization), it is a legitimate within-study reference rather than an
+inflated one.
+
+### 6.2 Cross-dataset external validation — `target_z` (primary, n = 6 train / 6 test)
+
+Accuracy / ROC-AUC per train → test direction (`external_by_direction.csv`,
+`normalization = target_z`):
 
 | Model | K | SKOV3→OVCAR5 (Acc / AUC) | OVCAR5→SKOV3 (Acc / AUC) |
 |---|---|---|---|
@@ -163,7 +193,31 @@ Key observations:
 4. **Direction asymmetry** is the dominant feature of the results: the model
    learned on SKOV-3 transfers to OVCAR5 at small K, but not vice versa.
 
-### 6.3 Candidate biomarker panel (top 20)
+These numbers are **unchanged** from the pre-pass pipeline: `target_z` reproduces
+the previous output exactly (per-gene differences 0).
+
+### 6.3 Cross-dataset external validation — `train_stats` (strict, leak-free)
+
+Same models, but the test cell line is normalized with the **training** line's
+statistics, so not a single value from the held-out dataset informs
+preprocessing. Summary over the 3 × 5 × 2 = 30 grid
+(`external_by_direction.csv`, `normalization = train_stats`):
+
+- Mean ROC-AUC **≈ 0.61**; 12 of 30 cells hit AUC = 1.0 but these are not
+  consistent across K, model, or direction.
+- **Accuracy is never 1.0** (all cells ≤ 0.83, median 0.50): because the test
+  features are centred/scaled by the *training* line, the predicted probabilities
+  are miscalibrated and cluster on one side of 0.5, so thresholding at 0.5
+  assigns essentially one class. AUC (rank-based) is the meaningful metric here;
+  Accuracy/Precision are threshold artefacts under this scheme.
+
+Interpretation: once cross-dataset normalization is made strictly
+non-transductive, the SKOV3→OVCAR5 transfer at small K weakens or disappears for
+most cells. The earlier `target_z` AUC = 1.0 result depends on standardizing the
+held-out batch with its own statistics, which is common practice in cross-study
+batch correction but is **not** a locked, deployable model.
+
+### 6.4 Candidate biomarker panel (top 20)
 
 Ranked by cross-dataset selection frequency across models × K, tie-broken by
 mean |log2FC| (`results/ml/biomarker_panel.csv`). `n_select_slots` is out of 15
@@ -202,17 +256,21 @@ signature. **Not a clinically validated diagnostic panel.**
 
 1. n = 12 total samples (6 per cell line). These results are **exploratory
    biomarker discovery**, not clinical diagnostic validation (proposal §7).
-2. **Leakage control:** feature selection is nested inside every training fold,
-   and the cross-dataset normalization is label-free (within-dataset per-gene
-   z-scoring), so no test information informs training.
-3. **Within-study separability is complete** (LOOCV AUC = 1.0) but likely
-   inflated by cell-line (batch) background; the external, per-direction test is
-   the meaningful yardstick.
-4. **Cross-dataset generalization is partial and asymmetric:** a small
-   SKOV-3-derived signature (K = 20) transfers to OVCAR5 (AUC 1.0), but not the
-   reverse, and the effect is destroyed at larger K. Under this design the two
-   cell lines do not share a single robust cross-study transcriptomic signature.
-   This is reported as-is rather than tuned to force a symmetric result.
+2. **Leakage control:** feature selection is nested inside every training fold.
+   Two normalization schemes are reported: `target_z` (test line standardized
+   with its own statistics — *transductive*, common in cross-study batch
+   correction but not deployable on a single unseen sample) and `train_stats`
+   (test line standardized with training statistics — strictly non-transductive).
+   Only the latter is fully leak-free; the two bracket the possible range.
+3. **Within-cell-line separability is near-complete** (LOOCV min AUC = 0.889)
+   but likely inflated by cell-line (batch) background; the external,
+   per-direction test is the meaningful yardstick.
+4. **Cross-dataset generalization is partial and asymmetric, and depends on the
+   normalization:** under `target_z` a small SKOV-3-derived signature (K = 20)
+   transfers to OVCAR5 (AUC 1.0) but not the reverse, and the effect is destroyed
+   at larger K. Under the strict `train_stats` scheme the transfer weakens or
+   disappears (mean AUC ≈ 0.61). This is reported as-is rather than tuned to
+   force a symmetric result.
 5. **Pooled external metrics are intentionally not reported** — the two
    directions live on opposite probability scales, so pooling yields
    uninterpretable numbers; only per-direction metrics are used.

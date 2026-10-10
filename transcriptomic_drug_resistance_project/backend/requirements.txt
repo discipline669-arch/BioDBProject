@@ -1,0 +1,10 @@
+# Backend for the drug-resistance ML results dashboard.
+# Python 3.11+.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pandas>=2.0
+
+# Run:
+#   python backend/app.py
+#   # or: uvicorn backend.app:app --reload --port 8000
+# Then open http://127.0.0.1:8000/

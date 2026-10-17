@@ -1,0 +1,123 @@
+# ============================================================
+# Project configuration - NSCLC / osimertinib resistance transcriptomics + ML
+# Single source of truth for paths, cohorts, labels, thresholds and seeds.
+# Both the R track (01-03) and the Python track (04-08) read this file.
+# ============================================================
+
+project:
+  name: "transcriptomic_drug_resistance_project_updated"
+  # Auto-detected if left as "auto"; env var BIODB_PROJ_UPDATED overrides.
+  root: "auto"
+  seed: 42
+
+# ------------------------------------------------------------
+# Cohorts. Both are bulk RNA-seq of EGFR-mutant NSCLC cell lines treated
+# with osimertinib. Raw counts come from NCBI's uniformly reprocessed
+# pipeline (GRCh38.p13, Entrez GeneID) so the two datasets share a gene
+# universe and DESeq2 can be applied to each.
+# ------------------------------------------------------------
+cohorts:
+  discovery:
+    accession: "GSE202859"
+    role: "discovery"
+    system: "cell_line"
+    title: "Parental vs osimertinib-resistant (-OR) EGFR-mutant NSCLC cells"
+    data_type: "counts"
+    conditions: ["Sensitive", "Resistant"]
+    group_by: "cell_line"        # group-aware splitting key (never split a line)
+    expected: {Sensitive: 9, Resistant: 9}
+    # Only these (shared) lines are retained; all others are dropped.
+    lines: ["PC9", "H1975", "HCC827"]
+    label_map:
+      sensitive_tokens: ["parental"]
+      resistant_tokens: ["-or", "resistant", "osi_res"]
+      # Metadata tokens that mark samples to EXCLUDE from the resistance contrast:
+      exclude_tokens: ["untreated", "osimertinib", "shrna", "smarca4", "yu-005c", "acute"]
+  validation:
+    accession: "GSE193258"
+    role: "validation"
+    system: "cell_line"
+    title: "DMSO vs osimertinib drug-tolerant persisters (3 weeks)"
+    data_type: "counts"
+    conditions: ["Sensitive", "Resistant"]
+    group_by: "cell_line"
+    expected: {Sensitive: 9, Resistant: 9}
+    lines: ["PC9", "H1975", "HCC827"]
+    label_map:
+      sensitive_tokens: ["dmso", "vehicle"]
+      resistant_tokens: ["dtp"]          # osimertinib DTPs 3w.
+      # acute exposure and (short/long) washout are excluded by policy
+      exclude_tokens: ["acute", "washout", "hcc2935"]
+
+deg:
+  fdr: 0.05
+  lfc: 1.0
+  min_count: 10
+  design: "~ cell_line + condition"     # cell_line blocks the 3 genetic backgrounds
+  method_priority: ["DESeq2", "limma", "ols"]  # first available is used
+  enrichment:
+    # BP = GO Biological Process (Enrichr GMT, symbol-based); KEGG/Reactome from
+    # their public Entrez sources (converted to symbols via Homo_sapiens.gene_info).
+    ontologies: ["BP", "KEGG", "Reactome"]
+    p_adjust: "BH"
+    pvalue_cutoff: 0.05
+    gsea_min_size: 15
+    gsea_max_size: 500
+    gsea_permutations: 1000
+    top_n_plot: 15
+    # R phase 3 can also run clusterProfiler, but Stage 5 (Python) is the single
+    # source of enrichment; set true only if you want the R GO-BP cross-check too.
+    run_in_r: false
+
+ml:
+  seeds: {global: 42, LogisticRegression: 142, RandomForest: 242, SVM: 442, XGBoost: 342}
+  feature_counts: [10, 20, 50, 100, 200, 500]
+  feature_selection:
+    univariate: "f_classif"      # inside training folds only
+    elastic_net: true            # LASSO/Elastic Net + stability selection
+    stability_resamples: 100
+    stability_max_genes: 5000  # top-variable pre-filter before EN stability
+    stability_threshold: 0.6     # keep genes selected in >= 60% of resamples
+  models: ["LogisticRegression", "RandomForest", "SVM", "XGBoost"]
+  cv:
+    outer_folds: 3               # 3 shared cell lines -> leave-one-line-out
+    inner_folds: 2
+    group_key: "cell_line"       # group-aware splitting (never split a line)
+    strategy: "StratifiedGroupKFold"
+  imbalance: "class_weight"      # "class_weight" | "none"; resampling must be in-fold
+  xgb:
+    max_depth: 2
+    min_child_weight: 1          # small n: keep splits possible
+    subsample: 0.8
+    colsample_bytree: 0.8
+    learning_rate: 0.1
+    n_estimators: 200
+    reg_lambda: 1.0
+  rf:
+    n_estimators: 300
+    min_samples_leaf: 2
+    max_features: "sqrt"
+  lr:
+    penalty: "elasticnet"
+    l1_ratio: 0.5
+    C: 1.0
+    max_iter: 2000
+    tol: 0.001
+  svm:
+    kernel: "rbf"
+    C: 1.0
+    gamma: "scale"
+  calibration:
+    method: "sigmoid"            # Platt scaling; fit on training only
+  bootstrap_ci: 2000
+  primary_metric: "roc_auc"
+
+paths:
+  data: "data"
+  annotation: "data/annotation"
+  results: "results"
+  figures: "results/figures"
+  tables: "results/tables"
+  models: "results/models"
+  reports: "results/reports"
+  synthetic: "data/_synthetic"

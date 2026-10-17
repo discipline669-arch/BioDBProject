@@ -1,0 +1,185 @@
+---
+title: "Transcriptomic Profiling of Osimertinib-Resistant EGFR-mutant NSCLC"
+subtitle: "GSE202859 (discovery) → GSE193258 (validation)"
+author: "BIO DB Project"
+date: today
+format:
+  html:
+    toc: true
+    code-fold: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r setup}
+library(knitr)
+opts_chunk$set(fig.align = "center", dpi = 150)
+
+proj <- Sys.getenv("BIODB_PROJ_UPDATED", unset = "")
+if (proj == "" || !dir.exists(proj)) proj <- getwd()
+cfg <- yaml::read_yaml(file.path(proj, "config", "config.yaml"))
+TAB  <- file.path(proj, cfg$paths$tables)
+FIG  <- file.path(proj, cfg$paths$figures)
+
+rd <- function(f) {
+  p <- file.path(TAB, f)
+  if (file.exists(p)) read.csv(p, check.names = FALSE) else NULL
+}
+inc <- function(f, width = "70%") {
+  p <- file.path(FIG, f)
+  if (file.exists(p)) knitr::include_graphics(p, dpi = 150) else NULL
+}
+```
+
+# 1. Study design
+
+Two independent bulk RNA-seq datasets profile the **same three EGFR-mutant NSCLC cell lines**
+(PC9, H1975, HCC827) under osimertinib resistance, giving **9 sensitive vs 9 resistant per
+dataset (36 samples total)**.
+
+| Role | Accession | Lines | Samples | Contrast | Gene space |
+|---|---|---|---|---|---|
+| Discovery | `r cfg$cohorts$discovery$accession` | PC9, H1975, HCC827 | 9 vs 9 | Parental vs `-OR` | NCBI raw counts, Entrez→symbol |
+| Validation | `r cfg$cohorts$validation$accession` | PC9, H1975, HCC827 | 9 vs 9 | DMSO vs `osi_DTP 3w` | NCBI raw counts, Entrez→symbol |
+
+Both matrices use NCBI's uniformly reprocessed counts (GRCh38.p13), so the two datasets share a
+gene universe and the comparison is alignment-harmonised by construction.
+
+**Label policy:** sensitive = parental / DMSO; resistant = `-OR` / osimertinib DTP 3 weeks.
+Acute 24 h exposure, short/long washout and shRNA/perturbation samples are **excluded**.
+
+# 2. Differential expression (DESeq2 design `~ cell_line + condition`)
+
+Per-cohort DEGs (FDR < `r cfg$deg$fdr`, |log2FC| > `r cfg$deg$lfc`), cell line included in the
+design to block the three genetic backgrounds.
+
+```{r deg-counts}
+for (acc in c(cfg$cohorts$discovery$accession, cfg$cohorts$validation$accession)) {
+  sig <- rd(paste0(acc, "_DEG_significant.csv"))
+  if (!is.null(sig)) cat(acc, ":", nrow(sig), "DEGs\n")
+}
+```
+
+```{r deg-volcano, results='asis'}
+for (acc in c(cfg$cohorts$discovery$accession, cfg$cohorts$validation$accession)) {
+  f <- inc(paste0(acc, "_volcano.png")); if (!is.null(f)) print(f)
+}
+```
+
+# 3. Cross-dataset validation
+
+Genes significant in **both** datasets with a **consistent direction** define the validated
+resistance signature (the proposal's primary cross-dataset criterion).
+
+```{r cross-dataset}
+val <- rd("validated_DEGs.csv")
+ov  <- rd("cross_DEG_overlap.csv")
+if (!is.null(ov)) cat("Discovery DEGs:", sum(ov$reg_disc != ""), "| Validation DEGs:", sum(ov$reg_val != ""), "\n")
+if (!is.null(val)) cat("VALIDATED DEGs (both, consistent):", nrow(val), "\n")
+```
+
+```{r cross-figs, results='asis'}
+f <- inc("cross_DEG_upset.png"); if (!is.null(f)) print(f)
+f <- inc("cross_DEG_lfc.png");  if (!is.null(f)) print(f)
+```
+
+Top validated genes:
+
+```{r validated-table}
+if (!is.null(val)) {
+  kable(head(val[, c("gene","lfc_disc","lfc_val","reg_disc","reg_val")], 15), digits = 3)
+} else kable(data.frame(note = "validated_DEGs.csv not found — run Phase 3."))
+```
+
+# 4. Classification (group-aware nested CV, split by cell line)
+
+Models: Logistic Regression, Random Forest, **SVM**, XGBoost (documented extension).
+Feature selection, scaling and hyperparameter tuning run **inside each training fold**.
+
+```{r nested-cv}
+m <- rd("nested_cv_metrics.csv")
+if (!is.null(m)) {
+  best <- m[order(m$accession, -m$roc_auc), ]
+  best <- do.call(rbind, lapply(split(best, best$accession), head, 5))
+  kable(best[, intersect(c("accession","model","k","roc_auc","pr_auc","sensitivity","specificity","n_splits"), names(best))], digits = 3)
+} else kable(data.frame(note = "nested_cv_metrics.csv not found — run Phase 5."))
+```
+
+```{r nested-figs, results='asis'}
+for (acc in c(cfg$cohorts$discovery$accession, cfg$cohorts$validation$accession)) {
+  for (suffix in c("_auc_vs_k.png","_roc.png","_pr.png","_confusion.png")) {
+    f <- inc(paste0(acc, suffix)); if (!is.null(f)) print(f)
+  }
+}
+```
+
+# 5. External validation (discovery → validation)
+
+The pipeline is locked on discovery and applied **once** to the validation cohort, under two
+test-normalisations (`train_stats` = strict; `target_z` = transductive). CIs are stratified
+bootstrap 95%.
+
+```{r external}
+e <- rd("external_validation.csv")
+if (!is.null(e)) {
+  e2 <- e[order(e$model, e$k, e$normalization), ]
+  kable(e2[, intersect(c("model","k","normalization","roc_auc","roc_auc_lo","roc_auc_hi",
+                         "pr_auc","sensitivity","specificity","f1","brier"), names(e2))], digits = 3)
+} else kable(data.frame(note = "external_validation.csv not found — run Phase 6."))
+```
+
+```{r external-figs, results='asis'}
+for (suffix in c("_roc.png","_pr.png","_calibration.png","_confusion.png")) {
+  f <- inc(paste0("external", suffix)); if (!is.null(f)) print(f)
+}
+```
+
+# 6. Candidate biomarker panel
+
+Composite rank combining elastic-net stability frequency, nested-CV selection frequency and mean
+|SHAP| (cross-checked against DEG log2FC).
+
+```{r panel}
+p <- rd("biomarker_panel.csv")
+if (!is.null(p)) kable(head(p, 20), digits = 3) else kable(data.frame(note = "biomarker_panel.csv not found — run Phase 7."))
+```
+
+```{r panel-figs, results='asis'}
+for (nm in c("shap_summary.png","biomarker_panel.png")) {
+  f <- inc(nm); if (!is.null(f)) print(f)
+}
+```
+
+# 7. Leakage controls
+
+```{r leakage}
+for (r in c(
+  "Cohorts kept separate; no pooled cross-validation.",
+  "Splits group by cell line; all replicates of a line stay in one fold.",
+  "Feature selection, scaling and tuning run inside each training fold.",
+  "External validation cohort evaluated once, after the pipeline is locked.",
+  "Full model × K grid reported; bootstrap CIs included."
+)) cat("-", r, "\n")
+```
+
+# 8. Limitations
+
+- Only **3 cell lines**; leave-one-line-out CV has 3 folds — results are exploratory.
+- The resistant arm is drug-treated while the sensitive arm is vehicle, so the signature is partly
+  entangled with acute drug exposure (a confound inherent to both datasets).
+- `-OR` (stable) and `osi_DTP` (reversible) are different resistance states; accepted per policy.
+- Predictive genes are **candidate biomarkers**, not causal drivers.
+
+# 9. Reproducibility
+
+```{r session}
+si <- file.path(proj, cfg$paths$reports, "session_info.txt")
+if (file.exists(si)) cat(readLines(si), sep = "\n")
+R.version.string
+```
+
+```{r sessionR}
+sessionInfo()
+```

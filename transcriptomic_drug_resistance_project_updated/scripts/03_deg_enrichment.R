@@ -236,7 +236,9 @@ if (!is.null(deg_disc) && !is.null(deg_val)) {
   write.csv(validated, file.path(TAB, "validated_DEGs.csv"), row.names = FALSE)
   cat("  VALIDATED DEGs (both, consistent):", nrow(validated), "\n")
 
-  # UpSet-style summary
+  # Overlap summary bar chart (categories of the 2-way DEG comparison).
+  # Note: this is deliberately NOT called an UpSet plot — it is a category bar
+  # summary; a true set-intersection UpSet figure remains future work.
   n_only_d <- length(only_d)
   n_only_v <- length(only_v)
   n_cons   <- sum(m$consistent & m$sign_agree)
@@ -253,7 +255,7 @@ if (!is.null(deg_disc) && !is.null(deg_val)) {
     labs(title = "Cross-dataset DEG overlap (validated resistance signature)",
          x = NULL, y = "Number of genes") +
     theme_bw(base_size = 13)
-  ggsave(file.path(FIG, "cross_DEG_upset.png"), p, width = 8, height = 5, dpi = 300)
+  ggsave(file.path(FIG, "cross_DEG_overlap_bar.png"), p, width = 8, height = 5, dpi = 300)
 
   if (nrow(m) > 2) {
     p2 <- ggplot(m, aes(lfc_disc, lfc_val, color = consistent)) +

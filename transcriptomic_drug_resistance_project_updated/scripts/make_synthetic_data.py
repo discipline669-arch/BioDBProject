@@ -58,7 +58,8 @@ def _build_cohort(rng, accession, batch_shift, shared_frac, seed_tag):
 
     X = pd.DataFrame(base, index=pd.Index(samples), columns=_genes())
     coldata = pd.DataFrame({"sample": samples, "condition": conds,
-                            "cohort": accession, "donor": donors})
+                            "cohort": accession, "donor": donors,
+                            "cell_line": donors})
     return X, coldata
 
 

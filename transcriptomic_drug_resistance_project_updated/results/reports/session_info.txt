@@ -1,14 +1,14 @@
-generated: 2026-10-15 21:49:59
-python: 3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]
-platform: Windows-10-10.0.26300-SP0
-project_root: E:\BioDBProject\BioDBProject\transcriptomic_drug_resistance_project_updated
+generated: 2026-10-19 23:59:44
+python: 3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]
+platform: Linux-7.0.0-38-generic-x86_64-with-glibc2.43
+project_root: /home/nianderbrox/Desktop/BioDBProject/transcriptomic_drug_resistance_project_updated
 synthetic_mode: False
 seed: 42
 
 package versions:
-  numpy: 2.2.6
-  pandas: 2.3.3
-  scipy: 1.17.1
-  sklearn: 1.9.0
-  xgboost: 3.2.0
-  shap: 0.51.0
+  numpy: 2.5.4
+  pandas: 3.0.6
+  scipy: 1.18.1
+  sklearn: 1.9.1
+  xgboost: 3.4.1
+  shap: 0.54.1

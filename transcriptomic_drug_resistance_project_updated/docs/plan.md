@@ -7,9 +7,15 @@ cell lines and drug (osimertinib).
 cross-dataset DEG validation + leakage-safe ML biomarker discovery.
 
 Known gaps (documented)
-- DEGs via base-R OLS fallback (no DESeq2/limma — no Bioconductor host).
-- GO/KEGG/Reactome/GSEA enrichment implemented in Python (Stage 5, `scripts/03b_enrichment.py`) to avoid Bioconductor.
-- External target_z (transductive) AUC ≈ 1.0 is optimistic; train_stats is the conservative view (SVM poor, LR/RF strong) — worth flagging in your write-up.
+- DEG engine is DESeq2 (Bioconductor) everywhere — **resolved 2026-04; validated DEG set updated
+  348 → 1112** (`validated_DEGs.csv`). See `docs/fix.md` X1–X2: Stage 5 + ML outputs on real data
+  are regenerated on the next real-data run of the pipeline.
+- GO/KEGG/Reactome/GSEA enrichment implemented in Python (Stage 5, `scripts/03b_enrichment.py`)
+  running on the DESeq2 DEGs. GSEA for the validated tag remains ORA-only pending D3.
+- External target_z (transductive) AUC ≈ 1.0 is optimistic; train_stats is the conservative view
+  (SVM poor, LR/RF strong) — worth flagging in your write-up.
+- `cross_DEG_overlap_bar.png` (renamed from `cross_DEG_upset.png`) is a bar-overlap summary, not a
+  true UpSet plot (BL-4, future work).
 This plan follows `docs/transcriptomic_drug_resistance_project_proposal.md`,
 `docs/data_Collection_strategy.md` and `docs/class_labels_resolved.md`.
 

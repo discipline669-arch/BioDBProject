@@ -11,14 +11,11 @@ suppressPackageStartupMessages({
 resolve_root <- function() {
   p <- Sys.getenv("BIODB_PROJ_UPDATED", unset = "")
   if (p != "" && dir.exists(p)) return(normalizePath(p))
+  # No absolute machine paths are baked in (portability; matches ml/config.py):
+  # the project root must be the CWD or set via BIODB_PROJ_UPDATED.
   here <- getwd()
-  cands <- c(here,
-             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project_updated",
-             "/home/nianderbrox/BioDB_Project/transcriptomic_drug_resistance_project_updated")
-  hit <- cands[dir.exists(cands) &
-                 file.exists(file.path(cands, "config", "config.yaml"))]
-  if (length(hit)) return(normalizePath(hit[1]))
-  cands[dir.exists(cands)][1]
+  if (file.exists(file.path(here, "config", "config.yaml"))) return(normalizePath(here))
+  here
 }
 
 load_config <- function(PROJ) {
@@ -69,9 +66,12 @@ load_ncbi_counts <- function(acc, dest, annotation_dir) {
     keep <- !is.na(sym)
     m <- m[keep, , drop = FALSE]
     rownames(m) <- make.unique(sym[keep])       # guarantee unique before collapse
-    # collapse exact-duplicate symbols by summing
+    # many Entrez IDs can map onto one symbol (X3): collapse by summing and
+    # LOG how many rows were collapsed so the number is auditable per run.
+    n_dup <- sum(duplicated(sym[keep]))
     m <- rowsum(m, group = sym[keep], reorder = TRUE)
-    cat("  mapped", nrow(m), "gene symbols\n")
+    cat("  mapped", nrow(m), "unique gene symbols\n")
+    cat("  collapsed", n_dup, "duplicate symbol row(s) onto those symbols\n")
   } else {
     cat("  [WARN] gene_info missing; keeping Entrez GeneID rownames\n")
   }

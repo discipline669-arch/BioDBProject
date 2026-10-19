@@ -1,9 +1,14 @@
 # Roadmap — NSCLC osimertinib resistance
 
 ## Prerequisites
-- Rscript = `C:\Program Files\R\R-4.6.1\bin\Rscript.exe`
-- Python = `C:\Program Files\Python311\python.exe`
-- Packages: see `env/R_packages.R` and `env/requirements.txt`
+- Rtrack (Windows host, used for the 2026-04 run): `Rscript = C:\Program Files\R\R-4.6.1\bin\Rscript.exe`;
+  Bioconductor (DESeq2) installed.
+- Python (Linux host, current): Python 3.11+ (3.14 works); project `.venv` in the repo root via
+  `python3 -m venv .venv && .venv/bin/pip install -r env/requirements.txt`; run scripts through
+  `.venv/bin/python scripts/run_pipeline.py ...`.
+- Packages: see `env/R_packages.R` and `env/requirements.txt`.
+- Note: `config/config.yaml` enables R-side steps via `deg.enrichment.run_in_r: <etiquette true/false>` — the
+  current setting only requires the R artifacts under `results/tables/` for the Python stages.
 
 ## Phases 1–3 (R, NCBI-based, no reCAPTCHA dependency)
 

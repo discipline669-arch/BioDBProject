@@ -40,8 +40,14 @@ def binary_metrics(y_true, y_prob, threshold: float = 0.5) -> dict:
         "specificity": spec,
         "brier": brier_score_loss(y_true, y_prob),
     }
-    out["roc_auc"] = roc_auc_score(y_true, y_prob) if len(set(y_true)) > 1 else float("nan")
-    out["pr_auc"] = average_precision_score(y_true, y_prob) if len(set(y_true)) > 1 else float("nan")
+    # AUCs are probabilities in [0, 1] by definition. sklearn's
+    # average_precision_score / roc_auc_score can overshoot by ~1e-16 through
+    # float accumulation on perfectly separated folds, which then breaks
+    # bootstrap bounds (lo <= point <= hi). Clamp to the valid domain.
+    out["roc_auc"] = float(min(max(
+        roc_auc_score(y_true, y_prob) if len(set(y_true)) > 1 else float("nan"), 0.0), 1.0))
+    out["pr_auc"] = float(min(max(
+        average_precision_score(y_true, y_prob) if len(set(y_true)) > 1 else float("nan"), 0.0), 1.0))
     return out
 
 
@@ -91,6 +97,12 @@ def _fast_metrics(y_true: np.ndarray, y_prob: np.ndarray, threshold: float = 0.5
         recall = tp_c / tp_c[-1]
         recall_prev = np.concatenate([[0.0], recall[:-1]])
         pr_auc = float(np.sum((recall - recall_prev) * precision))
+        # AUCs are probabilities in [0, 1] by definition; the rank/trapezoid
+        # arithmetic above can overshoot by float rounding (~1e-16) on
+        # perfectly separated folds, which then breaks bootstrap bounds
+        # (lo <= point <= hi). Clamp to the valid domain.
+        roc_auc = float(min(max(roc_auc, 0.0), 1.0))
+        pr_auc = float(min(max(pr_auc, 0.0), 1.0))
     return {"accuracy": acc, "precision": prec, "recall": rec, "f1": f1,
             "sensitivity": sens, "specificity": spec, "brier": brier,
             "roc_auc": float(roc_auc), "pr_auc": pr_auc}

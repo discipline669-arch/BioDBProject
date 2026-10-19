@@ -125,6 +125,9 @@ def main():
         sf = pd.read_csv(sel_freq_file)
         dsf = (sf[sf["accession"] == disc.accession]
                .groupby("gene")["selection_freq"].mean().rename("nested_sel_freq"))
+        # Explicit zeros over the full gene space: genes never selected must
+        # anchor the min-max scaling at 0 regardless of what the table stores.
+        dsf = dsf.reindex(disc.X.columns).fillna(0.0)
         parts.append(dsf.to_frame())
     if shap_rows:
         ds = (shap_df.groupby("gene")["mean_abs_shap"].mean().rename("shap"))

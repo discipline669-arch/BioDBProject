@@ -29,6 +29,11 @@ class ProbabilitySVC(SVC):
     Platt scaling (``probability=True``) is numerically unstable on tiny, nearly
     separable training folds and can invert the ranking. This wrapper keeps the
     ranking (AUC) exact and places the natural 0.5 threshold at decision == 0.
+
+    Caveat (fix X11): the sigmoid is monotone, NOT calibrated. Rank metrics
+    (ROC-AUC, PR-AUC, sensitivity/specificity at a training-fixed threshold) are
+    valid for these scores, but Brier/calibration numbers are reference-only and
+    must be labelled as such in the report.
     """
 
     def predict_proba(self, X):

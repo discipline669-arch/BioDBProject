@@ -27,10 +27,13 @@ import pandas as pd  # noqa: E402
 from sklearn.metrics import (average_precision_score, confusion_matrix,  # noqa: E402
                              ConfusionMatrixDisplay, precision_recall_curve, roc_curve)
 
+import joblib
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ml.config import load_project, set_global_seed  # noqa: E402
 from ml.data import align_gene_space, encode_labels, load_cohort  # noqa: E402
-from ml.cv import nested_cv  # noqa: E402
+from ml.cv import fit_full, nested_cv  # noqa: E402
+from ml.metrics import bootstrap_ci  # noqa: E402
 
 
 def main():
@@ -54,8 +57,29 @@ def main():
         for model in models:
             for k in ks:
                 res = nested_cv(cohort, model, k, project.cfg, seeds[model])
+                # D9: persist the final locked model for this config
+                # (same selection+scaling+inner-CV tuning on ALL samples).
+                full_model = fit_full(cohort, model, k, project.cfg, seeds[model])
+                mpath = project.models / f"{cohort.accession}_{model}_K{k}.joblib"
+                joblib.dump({"pipeline": full_model,
+                             "accession": cohort.accession, "model": model,
+                             "k": k, "cfg_seed": project.cfg["project"]["seed"]},
+                            mpath)
                 m = dict(res["metrics"])
                 m.update(accession=cohort.accession, model=model, k=k, n_splits=res["n_splits"])
+
+                # Bootstrap 95% CIs for the headline metrics (fix X10/B1).
+                # Stratified resampling of the OOF predictions only.
+                y_enc = encode_labels(cohort.y).reindex(res["oof_prob"].index).to_numpy()
+                p_arr = res["oof_prob"].to_numpy()
+                valid = np.isfinite(p_arr)
+                if valid.any() and len(set(y_enc[valid].tolist())) > 1:
+                    n_boot = int(project.cfg["ml"].get("bootstrap_ci", 2000))
+                    for metric in ("roc_auc", "pr_auc", "f1"):
+                        _, lo, hi = bootstrap_ci(
+                            y_enc[valid], p_arr[valid], metric,
+                            n_boot=n_boot, seed=project.cfg["project"]["seed"])
+                        m[f"{metric}_lo"], m[f"{metric}_hi"] = lo, hi
                 metric_rows.append(m)
 
                 y = encode_labels(cohort.y)
@@ -75,6 +99,12 @@ def main():
 
     metrics = pd.DataFrame(metric_rows)
     oof = pd.concat(pred_frames, ignore_index=True)
+    # NOTE: the selection-frequency table must keep the FULL gene space
+    # (zero rows included). Phase 7 averages nested_sel_freq over all
+    # (model x K) combos for a gene, so dropping zero rows would change the
+    # mean denominators and silently shift the biomarker panel. The ~40 MB
+    # file is generated artefact bloat, solved by .gitignore (untracked),
+    # not by shrinking the table.
     freq = pd.concat(freq_frames, ignore_index=True)
     metrics.to_csv(project.tables / "nested_cv_metrics.csv", index=False)
     oof.to_csv(project.tables / "nested_cv_oof_predictions.csv", index=False)

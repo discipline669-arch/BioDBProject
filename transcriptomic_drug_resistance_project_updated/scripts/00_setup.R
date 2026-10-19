@@ -19,17 +19,11 @@ resolve_root <- function() {
   p <- Sys.getenv("BIODB_PROJ_UPDATED", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   here <- getwd()
-  cands <- c(
-    file.path(here),
-    "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project_updated",
-    "/home/nianderbrox/BioDB_Project/transcriptomic_drug_resistance_project_updated"
-  )
-  # Prefer a directory that contains config/config.yaml
-  hit <- cands[dir.exists(cands) &
-                 file.exists(file.path(cands, "config", "config.yaml"))]
-  if (length(hit)) return(normalizePath(hit[1]))
-  # Fall back to the first existing candidate
-  cands[dir.exists(cands)][1]
+  # No absolute machine paths are baked in (portability); the project root is
+  # the CWD containing config/config.yaml.
+  if (file.exists(file.path(here, "config", "config.yaml")))
+    return(normalizePath(here))
+  here
 }
 PROJ <- resolve_root()
 cat("Project root:", PROJ, "\n")

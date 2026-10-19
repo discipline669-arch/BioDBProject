@@ -27,12 +27,10 @@ resolve_root <- function() {
   p <- Sys.getenv("BIODB_PROJ_UPDATED", unset = "")
   if (p != "" && dir.exists(p)) return(p)
   here <- getwd()
-  cands <- c(here,
-             "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project_updated")
-  hit <- cands[dir.exists(cands) &
-                 file.exists(file.path(cands, "config", "config.yaml"))]
-  if (length(hit)) return(normalizePath(hit[1]))
-  cands[dir.exists(cands)][1]
+  # No absolute machine paths are baked in (portability); see R_utils.R.
+  if (file.exists(file.path(here, "config", "config.yaml")))
+    return(normalizePath(here))
+  here
 }
 PROJ <- resolve_root()
 cfg  <- yaml::read_yaml(file.path(PROJ, "config", "config.yaml"))

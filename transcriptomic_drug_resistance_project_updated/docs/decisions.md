@@ -20,7 +20,8 @@ Status legend: `DECIDED` · `OPEN` · `DEFERRED`
 **Recommendation.** Option 1 — `train_stats` is the honest generalisation estimate; `target_z` is a
 transductive upper bound that leaks test-set statistics.
 
-**Status.** OPEN (needs to be frozen before the final report).
+**Status.** DECIDED (2026-10, user confirmation): Option 1 kept — `train_stats` is the headline;
+`target_z` reported as optimistic bound only. Summary/report wording updated (08_report.py).
 
 ---
 
@@ -34,7 +35,8 @@ grid only.
 **Recommendation.** (a) pre-register a single primary config (e.g. **LogReg + a fixed K chosen by
 inner CV**), and label everything else exploratory. Choose it from the recovered run, then freeze.
 
-**Status.** OPEN.
+**Status.** DECIDED (2026-10, user confirmation): **LogisticRegression, K=50** pre-registered;
+all other model x K cells are exploratory. Stated in 08_report.py output and report.
 
 ---
 
@@ -50,7 +52,11 @@ inner CV**), and label everything else exploratory. Choose it from the recovered
 **Recommendation.** Option 3 if time allows, else Option 1 with an explicit "approximate
 permutation null" caveat. Do not silently present Python GSEA as exact.
 
-**Status.** OPEN.
+**Status.** DECIDED (2026-10, user confirmation): Option 3 implemented — Python GSEA stays
+primary; `scripts/03c_fgsea_crosscheck.R` (R `fgsea`, micromamba env) re-ranks the same signed
+log2FC vectors against the same GMT collections exported by Stage 5
+(`results/tables/gene_sets/gene_sets_{GO_BP,KEGG,Reactome}.gmt`), writing
+`gsea_<ACC>_<SRC>_fgsea.csv`; 08_report.py reports NES concordance + top-5 overlap.
 
 ---
 
@@ -97,7 +103,13 @@ washout samples.
 **Recommendation.** (b) as an optional, clearly-labelled sensitivity section if time permits; do not
 fold into the main result.
 
-**Status.** DEFERRED.
+**Status.** UN-DEFERRED and implemented (2026-10, user confirmation): the validation cohort DOES
+carry an excluded time-course arm (osi_acute / short_washout / long_washout 72h-96h-7d-10d per
+line; HCC2935 excluded as non-shared). The extended blind VST is refit on all 60 samples by
+`scripts/02b_vst_extend.R` (primary matrix untouched), and `scripts/10_washout_sensitivity.py`
+applies the LOCKED discovery models (D9 persistence) under both `train_stats` and `target_z`
+schemes. Outputs: `washout_sensitivity{,_groups}.csv` + `washout_sensitivity.png`; reported by
+08_report.py. No accuracy claim is made for these samples (no two-class labels by design).
 
 ---
 
@@ -121,7 +133,11 @@ state they are reproducible artefacts.
 
 **Recommendation.** (a) — models are cheap to regenerate with fixed seeds; document clearly.
 
-**Status.** OPEN (low stakes).
+**Status.** DECIDED (2026-10, user confirmation — overrode recommendation): models ARE persisted
+and committed. `05_train_models.py` now dumps each config's final locked model
+(`ml.cv.fit_full`: same selection+scaling+inner-CV tuning on ALL samples) to
+`results/models/<ACC>_<model>_K<k>.joblib`; the `results/models/*.joblib` gitignore rule was
+dropped.
 
 ---
 
@@ -134,7 +150,11 @@ own measured genes.
 **Recommendation.** (a) for the validated set; (c) for per-cohort runs. Record the exact universe in
 the output metadata and methods.
 
-**Status.** OPEN (document; low stakes).
+**Status.** DECIDED (2026-10, user confirmation — overrode recommendation): the ORA background is
+the **all-annotated-genes universe per source** (all genes present in that source's gene-set
+collection) for every tag (per-cohort and validated). Implemented in `03b_enrichment.py`
+(`bg_univ`); run logs print the per-source background sizes. GSEA is whole-transcriptome and
+unaffected. Enrichment tables from 2026-10 onward reflect this universe.
 
 ---
 
@@ -147,7 +167,8 @@ cross-dataset ranking.
 **Recommendation.** (a) for the primary analysis (simpler, threshold-standard); mention shrinkage as
 an optional robustness check. If adopted, re-run Stage 4/5 and revisit D5.
 
-**Status.** OPEN.
+**Status.** DECIDED (2026-10, user confirmation): keep unshrunk LFC + BH FDR for the primary
+analysis (option (a)). Shrinkage (`apeglm`/`ashr`) stays an optional robustness check only.
 
 ---
 
@@ -168,7 +189,8 @@ author TPM. Not required.
 **Decision.** Use Quarto (`report.qmd` → `report.html`). Installing Quarto is a prerequisite task
 (see tasks_left A4). RMarkdown remains a fallback only if Quarto cannot be installed.
 
-**Status.** DECIDED (implementation blocked on install).
+**Status.** DECIDED — implemented 2026-10: Quarto 1.10.19 rendered `report.html` on the Linux host
+(user-space install + micromamba R; see tasks_left A4).
 
 ---
 

@@ -9,11 +9,10 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-RELATIVE_CANDIDATES = [
-    ".",
-    "E:/BioDBProject/BioDBProject/transcriptomic_drug_resistance_project_updated",
-    "/home/nianderbrox/BioDB_Project/transcriptomic_drug_resistance_project_updated",
-]
+# Root resolution is environment-driven: set BIODB_PROJ_UPDATED, or run from the
+# project root (CWD containing config/config.yaml). No absolute machine paths
+# are baked in (the build host is gone; portability rule 7.6 of plan.md).
+RELATIVE_CANDIDATES = ["."]
 
 
 def resolve_root() -> Path:

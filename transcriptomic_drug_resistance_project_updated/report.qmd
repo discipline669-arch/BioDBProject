@@ -81,7 +81,8 @@ if (!is.null(val)) cat("VALIDATED DEGs (both, consistent):", nrow(val), "\n")
 ```
 
 ```{r cross-figs, results='asis'}
-f <- inc("cross_DEG_upset.png"); if (!is.null(f)) print(f)
+f <- inc("cross_DEG_overlap_upset.png"); if (!is.null(f)) print(f)
+f <- inc("cross_DEG_overlap_bar.png"); if (!is.null(f)) print(f)
 f <- inc("cross_DEG_lfc.png");  if (!is.null(f)) print(f)
 ```
 
@@ -93,10 +94,81 @@ if (!is.null(val)) {
 } else kable(data.frame(note = "validated_DEGs.csv not found — run Phase 3."))
 ```
 
+# 3b. Functional enrichment (Stage 5)
+
+GO-BP (Enrichr GMT), KEGG and Reactome over-representation (hypergeometric + BH FDR) run on the
+DEG lists in symbol space; pre-ranked GSEA uses signed log2FC as the rank metric.
+
+```{r enrichment-ora}
+src <- c("GO_BP", "KEGG", "Reactome")
+e <- lapply(paste0("enrichment_validated_", src, ".csv"), rd)
+names(e) <- src
+for (s in src) {
+  if (!is.null(e[[s]])) {
+    top <- head(e[[s]][order(e[[s]]$padj), c("term_name", "overlap", "set_size", "fold_enrichment", "padj")], 6)
+    cat("\n**Validated signature —", s, "— top 6 by BH:**\n\n")
+    print(kable(top, digits = 3))
+  }
+}
+if (all(vapply(e, is.null, TRUE))) cat("enrichment_validated_*.csv not found — run Stage 5.\n")
+```
+
+```{r enrichment-figs, results='asis'}
+for (s in src) { f <- inc(paste0("enrichment_validated_", s, "_dotplot.png")); if (!is.null(f)) print(f) }
+```
+
+```{r enrichment-gsea}
+for (acc in c(cfg$cohorts$discovery$accession, cfg$cohorts$validation$accession)) {
+  g <- rd(paste0("gsea_", acc, "_KEGG.csv"))
+  if (!is.null(g)) {
+    cat("\n**GSEA -", acc, "- top 5 by BH:**\n\n")
+    print(kable(head(g[order(g$padj), c("term_name", "NES", "padj")], 5), digits = 3))
+  }
+}
+```
+
+```{r gsea-figs, results='asis'}
+for (acc in c(cfg$cohorts$discovery$accession, cfg$cohorts$validation$accession)) {
+  f <- inc(paste0("gsea_", acc, "_KEGG.png")); if (!is.null(f)) print(f)
+}
+```
+
+**GSEA engine cross-check (D3):** the Python pre-ranked GSEA (size-bucketed permutation null)
+is cross-checked with R `fgsea` on the same signed-log2FC ranks and the same GMT collections
+(memorandum tables `gsea_<ACC>_<SRC>_fgsea.csv`). Summary.md reports NES concordance and top-5
+agreement; the Python tables remain primary.
+
+# 3c. Sensitivity — biological reversibility (D7)
+
+The validation cohort carries an excluded time-course arm: osi_acute (24 h), short_washout,
+and long_washout (7 d / 72 h / 96 h) samples. The locked **discovery** models (persisted per
+D9) are applied to these samples after a blind VST refit on all 60 samples
+(`scripts/02b_vst_extend.R` — the primary matrix is untouched). No accuracy is claimed; the
+question is whether P(Resistant) drifts back toward the parental state after drug withdrawal.
+
+```{r washout-fig}
+f <- inc("washout_sensitivity.png"); if (!is.null(f)) print(f)
+```
+
+```{r washout-table}
+wg <- rd("washout_sensitivity_groups.csv")
+if (!is.null(wg)) {
+  prim <- wg[wg$model == "LogisticRegression" & wg$k == 50, ]
+  show <- if (nrow(prim)) prim else head(wg, 9)
+  kable(show[, c("group", "n", "prob_resistant_train_stats", "prob_resistant_target_z")], digits = 3)
+} else kable(data.frame(note = "washout_sensitivity_groups.csv not found — run 02b/10."))
+```
+
 # 4. Classification (group-aware nested CV, split by cell line)
 
 Models: Logistic Regression, Random Forest, **SVM**, XGBoost (documented extension).
 Feature selection, scaling and hyperparameter tuning run **inside each training fold**.
+
+**Pre-registered primary configuration (D2):** Logistic Regression, K=50. Every other
+model × K cell below is exploratory (winner's-curse control).
+
+**External-validation headline (D1):** `train_stats` is the headline normalisation;
+`target_z` rows are transductive bounds, never the headline.
 
 ```{r nested-cv}
 m <- rd("nested_cv_metrics.csv")

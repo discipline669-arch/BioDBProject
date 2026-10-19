@@ -119,6 +119,28 @@ def main():
     for src, d in gsets.items():
         print(f"  {src}: {len(d)} gene sets (symbol space)")
 
+    # D10 decision (2026-10): the ORA background is ALL genes annotated in that
+    # source's gene-set collection (per-source universe), replacing the
+    # measured-gene universes. GSEA ranks are whole-transcriptome and unaffected.
+    bg_univ = {}
+    for src, gs in gsets.items():
+        bg = set()
+        for info in gs.values():
+            bg |= set(info["genes"])
+        bg_univ[src] = sorted(bg)
+        print(f"  {src} background (annotated): {len(bg_univ[src])} symbols")
+
+    # Export the gene-set collections in GMT format so the R track can run the
+    # D3 fgsea cross-check against the exact same sets.
+    gmt_dir = project.tables / "gene_sets"
+    gmt_dir.mkdir(exist_ok=True)
+    for src, gs in gsets.items():
+        with open(gmt_dir / f"gene_sets_{src}.gmt", "w", encoding="utf-8") as fh:
+            for tid, info in gs.items():
+                fh.write("\t".join([tid, str(info.get("name", tid)),
+                                    *sorted(info["genes"])]) + "\n")
+        print(f"  exported gmt: gene_sets_{src}.gmt ({len(gs)} sets)")
+
     disc = project.cfg["cohorts"]["discovery"]["accession"]
     vald = project.cfg["cohorts"]["validation"]["accession"]
     valid = _read(project.tables / "validated_DEGs.csv")
@@ -143,9 +165,10 @@ def main():
 
     for tag, label, query_sym, universe_sym, rank_sym in tasks:
         query = set(query_sym)
-        univ = set(universe_sym)
-        print(f"\n== enrichment: {tag} ({len(query)} query / {len(univ)} universe symbols) ==")
+        print(f"\n== enrichment: {tag} ({len(query)} query symbols; "
+              f"D10 all-annotated background per source) ==")
         for src, gs in gsets.items():
+            univ = set(bg_univ[src])
             ora = analysis.ora(query, univ, gs, min_size, max_size)
             if not ora.empty:
                 out = project.tables / f"enrichment_{tag}_{src}.csv"

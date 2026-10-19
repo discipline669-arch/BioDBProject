@@ -82,6 +82,8 @@ def main():
     preds = pd.DataFrame(pred_frames)
     ext.to_csv(project.tables / "external_validation.csv", index=False)
     preds.to_csv(project.tables / "external_predictions.csv", index=False)
+    print("\nNote: SVM scores are monotone sigmoids of the decision function, "
+          "not calibrated probabilities; SVM Brier/calibration are reference-only.")
 
     # --- Figures at the representative K ---
     rep_k = ks[len(ks) // 2]

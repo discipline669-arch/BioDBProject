@@ -20,7 +20,7 @@ Binding leakage rules are in `config/leakage_checklist.md`.
 ```text
 config/        config.yaml (single source of truth), leakage_checklist.md
 env/           requirements.txt, R_packages.R
-scripts/       R track (01-03, NCBI counts) + Python track (03b enrichment, 04-08) + helpers
+scripts/       R track (01-03, NCBI counts) + Python track (03b enrichment, 04-08) + 02b/03c/09/10 extension scripts + helpers
 results/       tables/ figures/ models/ reports/ logs/
 data/          <ACC>/... (NCBI counts, matrices, coldata, processed)
 data/annotation/  Homo_sapiens.gene_info.gz, GO/KEGG/Reactome gene-set files
@@ -40,11 +40,24 @@ report.qmd     Quarto report
   KEGG and Reactome over-representation (hypergeometric + BH FDR) plus pre-ranked GSEA on
   the DEGs; group-aware (cell_line) nested CV, feature selection inside folds, once-only
   external validation (discovery→validation), SHAP interpretation, and report generation
-  use scikit-learn/xgboost/shap.
+  use scikit-learn/xgboost/shap. Locked models are persisted to `results/models/*.joblib`
+  (`05_train_models.py`, via `ml.cv.fit_full`).
+
+- **Extensions.** `02b_vst_extend.R` (blind VST refit on all 60 GSE193258 samples incl. the
+  excluded osimertinib time-course arm, enabling D7), `10_washout_sensitivity.py` (applies locked
+  discovery models to acute/washout samples; no accuracy claim — unsupervised drift analysis),
+  `03c_fgsea_crosscheck.R` (R `fgsea` cross-check of the Python GSEA engine, D3),
+  `09_upset.py` (deterministic UpSet-style overlap figure).
 
 ## Quick start (synthetic smoke test)
 
 No Bioconductor needed. Generates fake NSCLC-shaped data (3 lines, 18+18 samples):
+
+```bash
+BIODB_SYNTHETIC=1 .venv/bin/python scripts/run_pipeline.py --synthetic --make
+```
+
+or on Windows/PowerShell:
 
 ```powershell
 $env:BIODB_SYNTHETIC = "1"
@@ -78,7 +91,7 @@ are self-contained and parse series matrices without GEOquery. The expected orde
 
 | Variable | Effect |
 |---|---|
-| `BIODB_PROJ_UPDATED` | Override project root detection |
+| `BIODB_PROJ_UPDATED` | Override project root detection. All scripts resolve the project root from this variable or the current working directory (no hard-coded drive letters). |
 | `BIODB_SYNTHETIC=1` | Read/write synthetic tree instead of `data/` |
 
 All paths, cohorts, label maps, DEG thresholds, models/grid and CV are in `config/config.yaml`.
@@ -101,7 +114,14 @@ quarto render report.qmd
 
 ## Status
 
-Phases 1–3 (R) produce processed matrices and DEGs on real data. Stage 5 enrichment
-(GO-BP/KEGG/Reactome ORA + GSEA) and Phases 4–8 (Python) are verified and run on real
-NSCLC cohorts; see `results/tables/` for the deliverables.
+- R track (Phases 1-3) was re-run with **DESeq2/Bioconductor (April 2026)**: DEGs refreshed, the
+  cross-dataset **validated DEG set is now 1112 genes** (previously 348 from the OLS era).
+- The repo `.venv` (Linux) is the current Python host: `.venv/bin/python scripts/run_pipeline.py --synthetic`
+  is the regression command; real-data re-runs of Stage 5 + Phases 4-8 are tracked in
+  `docs/tasks_left.md` (A1/A2).
+- Heavy data artefacts (downloaded counts/matrices, `data/annotation/` gene sets, the full-space
+  `nested_cv_selection_freq.csv`) are **not committed** — reproduce them with
+  `scripts/01_fetch_data.R` (sources documented in `docs/plan.md` §2) and
+  `scripts/03b_enrichment.py` / `run_pipeline.py`.
+
 See `plan.md` for full NSCLC scope and `roadmap.md` for phase gates.

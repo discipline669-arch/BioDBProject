@@ -78,6 +78,13 @@ def nested_cv(cohort: Cohort, model_name: str, k: int, cfg: dict, seed: int) -> 
     }
 
 
+def fit_full(cohort: Cohort, model_name: str, k: int, cfg: dict, seed: int):
+    """D9: final locked model - the same selection+scaling+inner-CV tuning
+    applied to ALL samples of the cohort (no outer holdout)."""
+    X, y, groups = cohort.X, encode_labels(cohort.y), cohort.groups
+    return _fit_fold(X, y.to_numpy(), groups.to_numpy(), model_name, k, cfg, seed)
+
+
 def transfer(discovery: Cohort, validation: Cohort, model_name: str, k: int,
              cfg: dict, seed: int) -> dict:
     """Fit on the full discovery cohort, predict the validation cohort under two

@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 
+# Project virtualenv (kept on disk in-repo, not in git history)
+.venv/
+
 # R
 .Rhistory
 .RData
@@ -12,9 +15,22 @@ __pycache__/
 !data/.gitkeep
 !data/_synthetic/.gitkeep
 
+# Heavy data artefacts — reproducible via scripts/01_fetch_data.R (sources in
+# docs/plan.md §2), scripts/03b_enrichment.py and the pipeline itself:
+data/annotation/
+data/_synthetic/
+data/GSE*/*TPMs*.txt.gz
+data/GSE*/*raw_counts*.tsv.gz
+data/GSE*/*estimated_counts*.tsv.gz
+data/GSE*/*log2TPM*.tsv.gz
+data/GSE*/expression_processed.csv
+data/GSE*/expression_processed.rds
+# Small provenance files stay tracked: series_matrix.txt.gz, coldata*.csv
+
 # Large generated artefacts (keep tables/reports, ignore heavy binaries)
-results/models/*.joblib
+# D9 (decided): fitted models ARE committed now - results/models/*.joblib tracked
 results/logs/*.log
+results/tables/nested_cv_selection_freq.csv
 
 # OS / editor
 .DS_Store
